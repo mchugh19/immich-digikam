@@ -22,6 +22,7 @@
 
 #include <cmath>
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -70,7 +71,9 @@ public:
     int          total       = 0;
     int          done        = 0;
     int          failed      = 0;
+    int          alreadyThere = 0;
     bool         uploading   = false;
+    bool         checking    = false;
 
     // Download queue state.
     QList<ImmichAssetRef> dlPending;
@@ -140,6 +143,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
     connect(d->talker, &ImmichTalker::signalDownloadFinished, this, &ImmichWindow::slotDownloadFinished);
     connect(d->talker, &ImmichTalker::signalAlbumUpdated, this, &ImmichWindow::slotAlbumUpdated);
     connect(d->talker, &ImmichTalker::signalUploadSucceeded, this, &ImmichWindow::slotUploadSucceeded);
+    connect(d->talker, &ImmichTalker::signalUploadCheck, this, &ImmichWindow::slotUploadCheck);
     connect(d->talker, &ImmichTalker::signalError, this, &ImmichWindow::slotError);
     connect(d->talker, &ImmichTalker::signalBusy, this, &ImmichWindow::slotBusy);
 }
@@ -214,6 +218,7 @@ void ImmichWindow::slotUploadSelection()
     d->total       = items.size();
     d->done        = 0;
     d->failed      = 0;
+    d->alreadyThere = 0;
     d->uploading   = true;
 
     d->refreshBtn->setEnabled(false);
@@ -223,6 +228,63 @@ void ImmichWindow::slotUploadSelection()
     d->progress->setValue(0);
     d->progress->setVisible(true);
 
+    // Ask the server which of these files it already has, so they
+    // are skipped instead of re-uploaded.
+    QMap<QString, QString> checksums;
+
+    for (const QUrl& url : items)
+    {
+        const QString path = url.toLocalFile();
+        QFile file(path);
+
+        if (!path.isEmpty() && file.open(QIODevice::ReadOnly))
+        {
+            QCryptographicHash hash(QCryptographicHash::Sha1);
+
+            if (hash.addData(&file))
+            {
+                checksums.insert(path, QString::fromLatin1(hash.result().toBase64()));
+            }
+        }
+    }
+
+    if (!checksums.isEmpty())
+    {
+        d->checking = true;
+        d->status->setText(QStringLiteral("Checking which files are already on the server..."));
+        d->talker->checkUploads(checksums);
+        return;
+    }
+
+    nextUpload();
+}
+
+void ImmichWindow::slotUploadCheck(const QMap<QString, QString>& duplicatesByPath)
+{
+    d->checking = false;
+
+    QList<QUrl> remaining;
+
+    for (const QUrl& url : d->pending)
+    {
+        const QString assetId = duplicatesByPath.value(url.toLocalFile());
+
+        if (assetId.isEmpty())
+        {
+            remaining.append(url);
+        }
+        else
+        {
+            // Already on the server: count it, and keep its id so
+            // a target album still gets the asset assigned.
+            d->uploadedIds.append(assetId);
+            ++d->alreadyThere;
+            ++d->done;
+        }
+    }
+
+    d->pending = remaining;
+    d->progress->setValue(d->done);
     nextUpload();
 }
 
@@ -291,17 +353,19 @@ void ImmichWindow::finishUpload()
         return;
     }
 
-    d->status->setText(QStringLiteral("Uploaded %1 of %2 items (%3 failed).")
-                           .arg(d->done - d->failed)
+    d->status->setText(QStringLiteral("Uploaded %1 of %2 items (%3 already on the server, %4 failed).")
+                           .arg(d->done - d->failed - d->alreadyThere)
                            .arg(d->total)
+                           .arg(d->alreadyThere)
                            .arg(d->failed));
 }
 
 void ImmichWindow::slotAlbumUpdated()
 {
-    d->status->setText(QStringLiteral("Uploaded %1 of %2 items (%3 failed) and added them to the album.")
-                           .arg(d->done - d->failed)
+    d->status->setText(QStringLiteral("Uploaded %1 of %2 items (%3 already on the server, %4 failed) and added them to the album.")
+                           .arg(d->done - d->failed - d->alreadyThere)
                            .arg(d->total)
+                           .arg(d->alreadyThere)
                            .arg(d->failed));
 }
 
@@ -441,6 +505,16 @@ void ImmichWindow::finishDownload()
 
 void ImmichWindow::slotError(const QString& msg)
 {
+    if (d->checking)
+    {
+        // The duplicate check is an optimisation; if it fails,
+        // upload everything the original way.
+        d->checking = false;
+        d->status->setText(QStringLiteral("Duplicate check failed (%1); uploading everything.").arg(msg));
+        nextUpload();
+        return;
+    }
+
     if (d->dlListing)
     {
         d->dlListing   = false;

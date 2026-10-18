@@ -46,6 +46,9 @@ class ImmichSession;
  *   GET  /assets/<id>/original      download the original file
  *   GET  /assets/<id>/sidecar       download its XMP sidecar (404
  *                                   when the asset has none)
+ *   POST /assets/bulk-upload-check  which of a set of SHA-1
+ *                                   checksums the server already
+ *                                   has (action reject = duplicate)
  *
  * Authentication is the x-api-key header on every request.
  */
@@ -80,6 +83,14 @@ public:
      */
     void downloadAsset(const QString& assetId, const QString& targetPath);
 
+    /**
+     * Ask the server which of the given files (local path -> base64
+     * SHA-1 of the contents) it already holds. Emits
+     * signalUploadCheck with the duplicates only: local path ->
+     * existing asset id.
+     */
+    void checkUploads(const QMap<QString, QString>& checksumsByPath);
+
     void cancel();
 
 Q_SIGNALS:
@@ -92,6 +103,7 @@ Q_SIGNALS:
     void signalUploadSucceeded(const QString& assetId, const QString& status);
     void signalAlbumAssets(const QList<ImmichAssetRef>& assets);
     void signalDownloadFinished(const QString& assetId, bool ok);
+    void signalUploadCheck(const QMap<QString, QString>& duplicatesByPath);
 
 private Q_SLOTS:
 

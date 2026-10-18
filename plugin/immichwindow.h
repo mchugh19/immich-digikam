@@ -69,6 +69,7 @@ private Q_SLOTS:
     void slotAlbums(const QList<ImmichAlbum>& albums);
     void slotUploadSelection();
     void slotUploadSucceeded(const QString& assetId, const QString& status);
+    void slotUploadCheck(const QMap<QString, QString>& duplicatesByPath);
     void slotAlbumUpdated();
     void slotDownloadAlbum();
     void slotAlbumAssets(const QList<ImmichAssetRef>& assets);

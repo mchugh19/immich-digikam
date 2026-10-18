@@ -42,7 +42,7 @@ public:
 
     // What a pending reply should be parsed as when it finishes.
     enum class Op { None, ListAlbums, CreateAlbum, AddToAlbum, Upload,
-                    AlbumAssets, DownloadOriginal, DownloadSidecar };
+                    AlbumAssets, DownloadOriginal, DownloadSidecar, BulkCheck };
     QHash<QNetworkReply*, Op> ops;
 
     // Download context per reply: asset id and destination path.
@@ -222,6 +222,27 @@ void ImmichTalker::downloadAsset(const QString& assetId, const QString& targetPa
     Q_EMIT signalBusy(true);
 }
 
+void ImmichTalker::checkUploads(const QMap<QString, QString>& checksumsByPath)
+{
+    QJsonArray assets;
+
+    for (auto it = checksumsByPath.constBegin(); it != checksumsByPath.constEnd(); ++it)
+    {
+        assets.append(QJsonObject {
+            { QStringLiteral("id"),       it.key()   },
+            { QStringLiteral("checksum"), it.value() }
+        });
+    }
+
+    const QJsonObject obj { { QStringLiteral("assets"), assets } };
+
+    QNetworkRequest req = makeRequest(QStringLiteral("/assets/bulk-upload-check"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
+    d->ops.insert(reply, Private::Op::BulkCheck);
+    Q_EMIT signalBusy(true);
+}
+
 void ImmichTalker::cancel()
 {
     for (QNetworkReply* const reply : d->ops.keys())
@@ -358,6 +379,30 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
                 assets.append(asset);
             }
             Q_EMIT signalAlbumAssets(assets);
+            break;
+        }
+
+        case Private::Op::BulkCheck:
+        {
+            QMap<QString, QString> duplicates;
+            const QJsonArray results = doc.object().value(QStringLiteral("results")).toArray();
+
+            for (const QJsonValue& val : results)
+            {
+                const QJsonObject obj = val.toObject();
+
+                if (obj.value(QStringLiteral("action")).toString() == QLatin1String("reject"))
+                {
+                    const QString assetId = obj.value(QStringLiteral("assetId")).toString();
+
+                    if (!assetId.isEmpty())
+                    {
+                        duplicates.insert(obj.value(QStringLiteral("id")).toString(), assetId);
+                    }
+                }
+            }
+
+            Q_EMIT signalUploadCheck(duplicates);
             break;
         }
 
