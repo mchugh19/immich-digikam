@@ -305,6 +305,11 @@ struct IdentityMatch
     QString assetId;
     int     candidates  = 0;   // name+dimension matches found
     bool    strictTime  = false;
+    // The match rests on name + exact capture time alone
+    // (dimensions differ: the photo was cropped or resized).
+    // Identity then still has to be proven by the containment
+    // check before anything is replaced.
+    bool    dimsDiffer  = false;
 };
 
 inline IdentityMatch chooseIdentityMatch(const QList<IdentityCandidate>& candidates,
@@ -335,7 +340,32 @@ inline IdentityMatch chooseIdentityMatch(const QList<IdentityCandidate>& candida
 
     if (pool.isEmpty())
     {
-        return result;
+        // Cropped or resized since the upload: dimensions no
+        // longer match, so only an exact capture-time match on
+        // the same file name is evidence enough to proceed, and
+        // even then the pixel containment check must confirm it
+        // before the copy is replaced.
+        if (dateStr.isEmpty())
+        {
+            return result;
+        }
+
+        for (const IdentityCandidate& c : candidates)
+        {
+            if (c.name == fileName && c.localDateTime.left(19) == dateStr)
+            {
+                pool.append(c);
+            }
+        }
+
+        if (pool.isEmpty())
+        {
+            return result;
+        }
+
+        result.candidates  = pool.size();
+        result.strictTime  = true;
+        result.dimsDiffer  = true;
     }
 
     QList<IdentityCandidate> timed;
@@ -416,6 +446,75 @@ inline bool imagesLookSame(const QImage& a, const QImage& b)
     // (the new copy checksum-matches from then on).
     const double diff = imageDifference(a, b);
     return diff >= 0.0 && diff <= 5.0;
+}
+
+// Is localImg (a crop of the same photo, at an unknown scale
+// and offset) contained in serverImg? Slides the local image,
+// scaled to several fractions of the server frame, across a
+// 32px rendering of the server image and returns the best mean
+// absolute difference found, or -1 when either side is missing.
+// A true crop scores like the aligned comparison in
+// imageDifference (low single digits); an unrelated photo
+// scores far higher at every placement.
+inline double imageContainmentDifference(const QImage& serverImg, const QImage& localImg)
+{
+    if (serverImg.isNull() || localImg.isNull())
+    {
+        return -1.0;
+    }
+
+    const int G = 32;
+    const QImage S = serverImg.scaled(G, G, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                              .convertToFormat(QImage::Format_RGB32);
+    const double localAspect = double(localImg.height()) / qMax(1, localImg.width());
+    double best = 1e9;
+    static const double fractions[] = { 1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4 };
+
+    for (const double f : fractions)
+    {
+        const int patchW = qMax(4, int(G * f));
+        const int patchH = qMax(4, int(patchW * localAspect));
+
+        if (patchW > G || patchH > G)
+        {
+            continue;
+        }
+
+        const QImage patch = localImg.scaled(patchW, patchH, Qt::IgnoreAspectRatio,
+                                             Qt::SmoothTransformation)
+                                     .convertToFormat(QImage::Format_RGB32);
+
+        for (int oy = 0 ; oy + patchH <= G ; oy += 2)
+        {
+            for (int ox = 0 ; ox + patchW <= G ; ox += 2)
+            {
+                double sum = 0.0;
+
+                for (int y = 0 ; y < patchH ; ++y)
+                {
+                    const QRgb* const sr = reinterpret_cast<const QRgb*>(S.constScanLine(oy + y));
+                    const QRgb* const pr = reinterpret_cast<const QRgb*>(patch.constScanLine(y));
+
+                    for (int x = 0 ; x < patchW ; ++x)
+                    {
+                        sum += qAbs(qRed(sr[ox + x])   - qRed(pr[x]))
+                             + qAbs(qGreen(sr[ox + x]) - qGreen(pr[x]))
+                             + qAbs(qBlue(sr[ox + x])  - qBlue(pr[x]));
+                    }
+                }
+
+                best = qMin(best, sum / (patchW * patchH * 3.0));
+            }
+        }
+    }
+
+    return best > 1e8 ? -1.0 : best;
+}
+
+inline bool imageContains(const QImage& serverImg, const QImage& localImg)
+{
+    const double diff = imageContainmentDifference(serverImg, localImg);
+    return diff >= 0.0 && diff <= 6.0;
 }
 
 inline QJsonObject loadSyncState(const QString& path)

@@ -286,11 +286,14 @@ private Q_SLOTS:
 
     void identityNeedsNameAndDimensions()
     {
+        // Wrong name, and right name with different dimensions
+        // AND a different capture time (so the crop fallback
+        // cannot engage either): no match.
         const QList<IdentityCandidate> cands {
             cand(QStringLiteral("a"), QStringLiteral("other.jpg"),
                  QStringLiteral("2026-10-18T19:15:00.000Z"), QStringLiteral("2026-10-18"), 800, 600),
             cand(QStringLiteral("b"), QStringLiteral("photo.jpg"),
-                 QStringLiteral("2026-10-18T19:15:00.000Z"), QStringLiteral("2026-10-18"), 1024, 768),
+                 QStringLiteral("2026-10-18T09:00:00.000Z"), QStringLiteral("2026-10-18"), 1024, 768),
         };
         const IdentityMatch m = chooseIdentityMatch(
             cands, QStringLiteral("photo.jpg"), QStringLiteral("2026-10-18T19:15:00"), 800, 600);
@@ -338,6 +341,57 @@ private Q_SLOTS:
             cands, QStringLiteral("photo.jpg"), QStringLiteral("2026-10-18T19:15:00"), 800, 600);
         QCOMPARE(m.assetId, QStringLiteral("second"));
         QVERIFY(!m.strictTime);
+    }
+
+    void identityCropFallbackNeedsExactTime()
+    {
+        const QList<IdentityCandidate> cands {
+            cand(QStringLiteral("cropped"), QStringLiteral("photo.jpg"),
+                 QStringLiteral("2026-10-18T19:15:00.000Z"), QStringLiteral("2026-10-18"), 400, 300),
+        };
+
+        IdentityMatch m = chooseIdentityMatch(
+            cands, QStringLiteral("photo.jpg"), QStringLiteral("2026-10-18T19:15:00"), 800, 600);
+        QCOMPARE(m.assetId, QStringLiteral("cropped"));
+        QVERIFY(m.strictTime);
+        QVERIFY(m.dimsDiffer);
+
+        // Same setup, different capture second: no match at all.
+        m = chooseIdentityMatch(
+            cands, QStringLiteral("photo.jpg"), QStringLiteral("2026-10-18T19:15:01"), 800, 600);
+        QVERIFY(m.assetId.isEmpty());
+    }
+
+    QImage pattern(int size, int phase)
+    {
+        QImage img(size, size, QImage::Format_RGB32);
+
+        for (int y = 0 ; y < size ; ++y)
+        {
+            QRgb* line = reinterpret_cast<QRgb*>(img.scanLine(y));
+
+            for (int x = 0 ; x < size ; ++x)
+            {
+                const int r = (x * 255 / size + phase) % 256;
+                const int g = (y * 255 / size) % 256;
+                const int b = ((x + y) * 255 / (2 * size) + phase * 2) % 256;
+                line[x] = qRgb(r, g, b);
+            }
+        }
+
+        return img;
+    }
+
+    void containmentFindsCrops()
+    {
+        const QImage full = pattern(96, 0);
+        const QImage crop = full.copy(40, 20, 48, 40);
+        QVERIFY(imageContains(full, crop));
+        QVERIFY(imageContains(full, full));
+
+        const QImage other = pattern(96, 120);
+        QVERIFY(!imageContains(full, other.copy(10, 10, 48, 40)));
+        QVERIFY(imageContainmentDifference(QImage(), crop) < 0.0);
     }
 
     // --- pixel comparison (immichsync.h) -----------------------

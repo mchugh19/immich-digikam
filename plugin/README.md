@@ -48,10 +48,13 @@ digiKam's own web-service plugins (Piwigo in particular).
   pixels, same capture time) uploads the new version, puts
   it in every album the old copy belonged to, syncs its
   metadata, and moves the old copy to Immich's trash
-  (recoverable for 30 days). When the evidence is ambiguous
-  (no matching capture time, several candidates), nothing
-  is overwritten: the file uploads as new, or syncs to the
-  newest matching copy.
+  (recoverable for 30 days). A crop changes the dimensions,
+  so it matches on file name and exact capture time alone,
+  and only replaces after a containment check confirms the
+  local image really is a crop of the server's photo. When
+  the evidence is ambiguous (no matching capture time,
+  several candidates), nothing is overwritten: the file
+  uploads as new, or syncs to the newest matching copy.
 - Metadata sync on export: a selected file the server
   already has (checksum match) is not re-uploaded, but its
   digiKam tags, rating, caption and GPS are diffed against

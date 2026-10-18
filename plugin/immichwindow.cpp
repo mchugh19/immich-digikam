@@ -174,6 +174,7 @@ public:
     QUrl         identityUrl;
     QString      identityCandidateId;
     bool         identityStrict = false;
+    bool         identityDimsDiffer = false;
     bool         identityWaitingThumb = false;
     int          matchedSync   = 0;
     int          matchedMulti  = 0;
@@ -1138,6 +1139,7 @@ void ImmichWindow::slotUploadSelection()
     d->identityQueue.clear();
     d->identityCandidateId.clear();
     d->identityStrict = false;
+    d->identityDimsDiffer = false;
     d->identityWaitingThumb = false;
     d->matchedSync   = 0;
     d->matchedMulti  = 0;
@@ -1300,6 +1302,7 @@ void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray&
 
     d->identityCandidateId  = match.assetId;
     d->identityStrict       = match.strictTime;
+    d->identityDimsDiffer   = match.dimsDiffer;
     d->identityWaitingThumb = true;
     d->talker->fetchThumbnail(match.assetId);
 }
@@ -1329,6 +1332,23 @@ void ImmichWindow::slotIdentityThumb(const QString& /*assetId*/, const QByteArra
 
     QImage remoteImage;
     remoteImage.loadFromData(bytes);
+
+    if (d->identityDimsDiffer)
+    {
+        // Cropped or resized since the upload. That is a real
+        // edit by definition; the only question is whether this
+        // really is the same photo, which the containment check
+        // answers. Proven: replace. Unproven: upload as new.
+        if (!localImage.isNull() && !remoteImage.isNull()
+            && imageContains(remoteImage, localImage))
+        {
+            d->replaceOldByPath.insert(path, d->identityCandidateId);
+        }
+
+        d->pending.append(url);
+        nextIdentity();
+        return;
+    }
 
     // Undecodable on either side (RAW files, say) counts as
     // "same": sync the metadata, never destroy on uncertainty.
