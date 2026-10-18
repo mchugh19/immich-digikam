@@ -1785,31 +1785,20 @@ QString ImmichWindow::sidecarFor(const QUrl& url, const QString& filePath)
 {
     const QFileInfo info(filePath);
 
-    // 1. An on-disk sidecar digiKam maintains next to the file is
-    //    the richest source; it wins outright.
-    const QString candidates[] = {
-        filePath + QStringLiteral(".xmp"),
-        info.path() + QLatin1Char('/') + info.completeBaseName() + QStringLiteral(".xmp")
-    };
-
-    for (const QString& candidate : candidates)
-    {
-        if (QFileInfo::exists(candidate))
-        {
-            return candidate;
-        }
-    }
-
     const QString tempPath = QDir::tempPath()
                              + QStringLiteral("/immich-digikam-")
                              + info.fileName()
                              + QStringLiteral(".xmp");
 
-    // 2. Metadata that lives in digiKam's database (tags, rating,
-    //    caption, GPS set in digiKam but never written into the
-    //    file): generate the sidecar from the item info, in the
-    //    packet shape the bridge contract verified against a live
-    //    server.
+    // 1. digiKam's database is the user's current intent: this
+    //    tool runs inside digiKam on digiKam's selection, and an
+    //    export should carry the tags and rating as they stand in
+    //    digiKam now. Generate the sidecar from the item info, in
+    //    the packet shape the bridge contract verified against a
+    //    live server. (An on-disk sidecar used to win outright;
+    //    a stale fixture-era .xmp next to a test photo then
+    //    silently overrode fresh digiKam edits, exporting a
+    //    rating and tags the user had already changed.)
     if (d->iface)
     {
         const DItemInfo item(d->iface->itemInfo(url));
@@ -1832,6 +1821,23 @@ QString ImmichWindow::sidecarFor(const QUrl& url, const QString& filePath)
                 d->tempSidecar = tempPath;
                 return tempPath;
             }
+        }
+    }
+
+    // 2. An on-disk sidecar next to the file: the source when
+    //    digiKam's database holds no metadata for the item (a
+    //    sidecar written by another tool that digiKam has not
+    //    catalogued, say).
+    const QString candidates[] = {
+        filePath + QStringLiteral(".xmp"),
+        info.path() + QLatin1Char('/') + info.completeBaseName() + QStringLiteral(".xmp")
+    };
+
+    for (const QString& candidate : candidates)
+    {
+        if (QFileInfo::exists(candidate))
+        {
+            return candidate;
         }
     }
 
