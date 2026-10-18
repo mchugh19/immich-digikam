@@ -108,3 +108,15 @@ Then: Plugins settings should list Immich, the Export menu gains
 "Export to Immich..." and the Import menu gains "Import from
 Immich...". Each opens the shared window in its own mode, and
 Refresh albums should list the server's albums.
+
+## Unit tests
+
+The pure logic that carries the behavioral contracts (the XMP
+sidecar builder, the preservation merge, sync planning, field
+hashing, snapshots and the snapshot gating rules) has a Qt Test
+suite under `tests/`, with no digiKam or network dependency:
+
+```sh
+cmake -S tests -B build-tests && cmake --build build-tests
+ctest --test-dir build-tests --output-on-failure
+```
