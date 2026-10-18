@@ -118,8 +118,10 @@ public:
     QHash<QString, QPixmap> coverCache;
     int                   previewGen     = 0;
 
-    // One serialized thumbnail pipeline serves both the preview
-    // grid and the album covers on the album tiles.
+    // The thumbnail pipeline serves both the preview grid and
+    // the album covers on the album tiles, a few fetches at a
+    // time: one at a time made a 150-album view feel slow even
+    // though each image is small.
     struct ThumbJob
     {
         bool    cover   = false;
@@ -127,8 +129,11 @@ public:
         QString assetId;    // the asset whose thumbnail is fetched
     };
     QList<ThumbJob> thumbJobs;
-    ThumbJob        currentThumb;
-    bool            thumbBusy = false;
+    // Fetches in flight by asset id, with every job waiting on
+    // that asset (an asset can be an album cover and a preview
+    // item at once; one fetch satisfies both).
+    QHash<QString, QList<ThumbJob>> thumbInFlight;
+    static constexpr int maxThumbFetches = 4;
 
     // Metadata refresh queue for files skipped as already on
     // disk: (asset id, local target path).
@@ -583,32 +588,40 @@ void ImmichWindow::queueThumb(bool cover, const QString& key, const QString& ass
 
 void ImmichWindow::pumpThumbs()
 {
-    if (d->thumbBusy || d->thumbJobs.isEmpty())
+    while (d->thumbInFlight.size() < Private::maxThumbFetches && !d->thumbJobs.isEmpty())
     {
-        return;
-    }
+        const Private::ThumbJob job = d->thumbJobs.takeFirst();
 
-    d->currentThumb = d->thumbJobs.takeFirst();
-    d->thumbBusy    = true;
-
-    // Disk cache first: a hit is delivered through the same
-    // completion path as a network reply.
-    QFile cached(d->thumbCacheDir + QLatin1Char('/')
-                 + d->currentThumb.assetId + QStringLiteral(".thumb"));
-
-    if (cached.open(QIODevice::ReadOnly))
-    {
-        const QByteArray bytes = cached.readAll();
-        cached.close();
-
-        if (!bytes.isEmpty())
+        if (d->thumbInFlight.contains(job.assetId))
         {
-            slotThumbnail(d->currentThumb.assetId, bytes);
-            return;
+            // A fetch for this asset is already running; park the
+            // job with it and let its reply satisfy both.
+            d->thumbInFlight[job.assetId].append(job);
+            continue;
         }
-    }
 
-    d->talker->fetchThumbnail(d->currentThumb.assetId);
+        d->thumbInFlight.insert(job.assetId, { job });
+
+        // Disk cache first: a hit is delivered through the same
+        // completion path as a network reply (which re-enters
+        // pumpThumbs; the loop just re-checks its conditions).
+        QFile cached(d->thumbCacheDir + QLatin1Char('/')
+                     + job.assetId + QStringLiteral(".thumb"));
+
+        if (cached.open(QIODevice::ReadOnly))
+        {
+            const QByteArray bytes = cached.readAll();
+            cached.close();
+
+            if (!bytes.isEmpty())
+            {
+                slotThumbnail(job.assetId, bytes);
+                continue;
+            }
+        }
+
+        d->talker->fetchThumbnail(job.assetId);
+    }
 }
 
 void ImmichWindow::dropThumbJobs(bool covers)
@@ -618,6 +631,31 @@ void ImmichWindow::dropThumbJobs(bool covers)
         if (d->thumbJobs.at(i).cover == covers)
         {
             d->thumbJobs.removeAt(i);
+        }
+    }
+
+    // Parked jobs go too. A fetch already in flight cannot be
+    // singled out for abort; its reply still lands in the caches,
+    // and the UI application checks the item still exists.
+    for (auto it = d->thumbInFlight.begin() ; it != d->thumbInFlight.end() ;)
+    {
+        QList<Private::ThumbJob>& jobs = it.value();
+
+        for (int i = jobs.size() - 1 ; i >= 0 ; --i)
+        {
+            if (jobs.at(i).cover == covers)
+            {
+                jobs.removeAt(i);
+            }
+        }
+
+        if (jobs.isEmpty())
+        {
+            it = d->thumbInFlight.erase(it);
+        }
+        else
+        {
+            ++it;
         }
     }
 }
@@ -976,12 +1014,6 @@ void ImmichWindow::finishUpload()
     setTransferButtonsEnabled(true);
     d->cancelBtn->setVisible(false);
 
-    if (!d->targetAlbumId.isEmpty())
-    {
-        // The upload changed this album on the server; its
-        // cached contents listing is stale now.
-        d->listingCache.remove(QStringLiteral("album:") + d->targetAlbumId);
-    }
 
     if (!d->tempSidecar.isEmpty())
     {
@@ -1013,8 +1045,16 @@ void ImmichWindow::finishUpload()
                            .arg(d->failed));
 }
 
-void ImmichWindow::slotAlbumUpdated()
+void ImmichWindow::slotAlbumUpdated(bool changed)
 {
+    if (changed && !d->targetAlbumId.isEmpty())
+    {
+        // The album actually gained assets; its cached contents
+        // listing is stale. (When every asset was already in the
+        // album, the server changed nothing and the cache stays.)
+        d->listingCache.remove(QStringLiteral("album:") + d->targetAlbumId);
+    }
+
     d->status->setText(QStringLiteral("Uploaded %1 of %2 items (%3 already on the server, %4 failed) and added them to the album.")
                            .arg(d->done - d->failed - d->alreadyThere)
                            .arg(d->total)
@@ -1199,8 +1239,7 @@ void ImmichWindow::slotPreviewSortChanged()
 
 void ImmichWindow::slotThumbnail(const QString& assetId, const QByteArray& bytes)
 {
-    d->thumbBusy = false;
-    const Private::ThumbJob job = d->currentThumb;
+    const QList<Private::ThumbJob> jobs = d->thumbInFlight.take(assetId);
 
     if (!bytes.isEmpty())
     {
@@ -1218,27 +1257,30 @@ void ImmichWindow::slotThumbnail(const QString& assetId, const QByteArray& bytes
                 out.write(bytes);
             }
 
-            if (job.cover)
+            d->thumbCache.insert(assetId, pix);
+
+            for (const Private::ThumbJob& job : jobs)
             {
-                d->coverCache.insert(job.key, pix);
-
-                if (QListWidgetItem* const item = findAlbumItem(job.key))
+                if (job.cover)
                 {
-                    setAlbumCover(item, pix);
-                }
-            }
-            else
-            {
-                d->thumbCache.insert(assetId, pix);
+                    d->coverCache.insert(job.key, pix);
 
-                for (int i = 0 ; i < d->previewList->count() ; ++i)
-                {
-                    QListWidgetItem* const item = d->previewList->item(i);
-
-                    if (item->data(Qt::UserRole).toString() == assetId)
+                    if (QListWidgetItem* const item = findAlbumItem(job.key))
                     {
-                        item->setIcon(QIcon(pix));
-                        break;
+                        setAlbumCover(item, pix);
+                    }
+                }
+                else
+                {
+                    for (int i = 0 ; i < d->previewList->count() ; ++i)
+                    {
+                        QListWidgetItem* const item = d->previewList->item(i);
+
+                        if (item->data(Qt::UserRole).toString() == assetId)
+                        {
+                            item->setIcon(QIcon(pix));
+                            break;
+                        }
                     }
                 }
             }

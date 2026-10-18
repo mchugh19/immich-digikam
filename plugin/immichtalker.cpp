@@ -238,8 +238,11 @@ void ImmichTalker::listTagAssets(const QString& tagId)
 
 void ImmichTalker::fetchThumbnail(const QString& assetId)
 {
+    // Pin the small generated size (250px) explicitly: it is
+    // what the endpoint defaults to today, and the previews and
+    // covers have no use for the 1440px preview size.
     QNetworkReply* const reply = d->net->get(
-        makeRequest(QStringLiteral("/assets/%1/thumbnail").arg(assetId)));
+        makeRequest(QStringLiteral("/assets/%1/thumbnail?size=thumbnail").arg(assetId)));
     d->ops.insert(reply, Private::Op::Thumbnail);
     d->thumbCtx.insert(reply, assetId);
     Q_EMIT signalBusy(true);
@@ -528,8 +531,25 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         }
 
         case Private::Op::AddToAlbum:
-            Q_EMIT signalAlbumUpdated();
+        {
+            // The response is one result per asset; an asset
+            // already in the album comes back success=false
+            // ("duplicate"), so "changed" is exactly "at least
+            // one asset was actually added".
+            bool changed = false;
+
+            for (const QJsonValue& val : doc.array())
+            {
+                if (val.toObject().value(QStringLiteral("success")).toBool())
+                {
+                    changed = true;
+                    break;
+                }
+            }
+
+            Q_EMIT signalAlbumUpdated(changed);
             break;
+        }
 
         case Private::Op::ListTags:
         {

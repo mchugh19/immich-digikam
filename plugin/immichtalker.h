@@ -126,7 +126,7 @@ Q_SIGNALS:
     void signalTags(const QList<ImmichTag>& tagList);
     void signalThumbnail(const QString& assetId, const QByteArray& bytes);
     void signalAlbumCreated(const ImmichAlbum& album);
-    void signalAlbumUpdated();
+    void signalAlbumUpdated(bool changed);
     void signalUploadSucceeded(const QString& assetId, const QString& status);
     void signalAlbumAssets(const QList<ImmichAssetRef>& assets);
     void signalDownloadFinished(const QString& assetId, bool ok);
