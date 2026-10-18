@@ -49,14 +49,13 @@ add_library(generic_immich MODULE
     immichwindow.cpp
 )
 
-# Embed the plugin icon in the binary: the actions and the plugin
-# listing use it, and it must work when the .so is copied into
-# place by hand (the theme install rule below then never runs).
-qt_add_resources(generic_immich "immich_icons"
-    PREFIX "/"
-    BASE "icons"
-    FILES "icons/dk-immich.svg" "icons/dk-tag.svg"
-)
+# Embed the plugin icons in the binary: the actions and the
+# plugin listing use them, and they must work when the .so is
+# copied into place by hand (the theme install rule below then
+# never runs). The .qrc is shared with the in-tree build file
+# under upstream/.
+qt_add_resources(immich_RCC_SRCS immich_icons.qrc)
+target_sources(generic_immich PRIVATE ${immich_RCC_SRCS})
 
 target_link_libraries(generic_immich
     PRIVATE

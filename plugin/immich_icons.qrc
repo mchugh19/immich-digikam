@@ -1,0 +1,11 @@
+<RCC>
+    <!-- Plugin icons, embedded in the binary so the plugin
+         shows its icon however the .so was installed. The
+         resource paths are what the code looks up:
+         :/dk-immich.svg (plugin and actions) and
+         :/dk-tag.svg (tag tiles). -->
+    <qresource prefix="/">
+        <file alias="dk-immich.svg">icons/dk-immich.svg</file>
+        <file alias="dk-tag.svg">icons/dk-tag.svg</file>
+    </qresource>
+</RCC>
