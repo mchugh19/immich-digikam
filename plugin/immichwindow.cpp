@@ -37,7 +37,9 @@
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
+#include <QImageReader>
 #include <QPixmap>
+#include <QShowEvent>
 #include <QRadioButton>
 #include <QLineEdit>
 #include <QListWidget>
@@ -377,6 +379,13 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
         layout->addLayout(previewRow);
         layout->addWidget(d->previewList, 3);
     }
+    else
+    {
+        // The export tool's preview is the upload set itself:
+        // the images currently selected in digiKam.
+        layout->addWidget(new QLabel(QStringLiteral("Images selected in digiKam:")));
+        layout->addWidget(d->previewList, 3);
+    }
 
     layout->addWidget(d->targetLabel);
     layout->addWidget(d->uploadBtn);
@@ -397,6 +406,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
                     ? QStringLiteral("Upload target: %1").arg(item->data(Qt::UserRole + 1).toString())
                     : QStringLiteral("Upload target: no album (library only)"));
                 refreshTileStyles();
+                updateExportStatus();
 
                 if (item && d->mode == Mode::Import)
                 {
@@ -461,6 +471,86 @@ void ImmichWindow::setPlugin(DPlugin* const /*plugin*/)
 {
     // Kept for parity with digiKam's other web-service windows,
     // which receive the plugin instance here.
+}
+
+void ImmichWindow::showEvent(QShowEvent* event)
+{
+    QDialog::showEvent(event);
+
+    if (d->mode == Mode::Export)
+    {
+        // The digiKam selection may have changed since the tool
+        // was last open; it is the upload set, so show it afresh.
+        fillUploadPreview();
+        updateExportStatus();
+    }
+
+    // With credentials already stored, opening the tool is
+    // intent enough: refresh the sources without making the
+    // user press Refresh first.
+    if (!d->session->url().isEmpty() && !d->session->apiKey().isEmpty()
+        && !d->uploading && !d->downloading)
+    {
+        slotRefreshAlbums();
+    }
+}
+
+void ImmichWindow::fillUploadPreview()
+{
+    d->previewList->clear();
+
+    if (!d->iface)
+    {
+        return;
+    }
+
+    QPixmap blank(96, 96);
+    blank.fill(Qt::transparent);
+    const QIcon placeholder(blank);
+
+    for (const QUrl& url : d->iface->currentSelectedItems())
+    {
+        const QString path = url.toLocalFile();
+        auto* const item = new QListWidgetItem(QFileInfo(path).fileName(), d->previewList);
+        item->setSizeHint(QSize(116, 128));
+        item->setToolTip(path);
+
+        QImageReader reader(path);
+        reader.setScaledSize(QSize(96, 96));
+        const QImage image = reader.read();
+        QPixmap pix = image.isNull() ? QPixmap() : QPixmap::fromImage(image);
+
+        if (pix.width() > 96 || pix.height() > 96)
+        {
+            pix = pix.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
+
+        item->setIcon(pix.isNull() ? placeholder : QIcon(pix));
+    }
+}
+
+void ImmichWindow::updateExportStatus()
+{
+    if (d->mode != Mode::Export || d->uploading)
+    {
+        return;
+    }
+
+    const int count = d->iface ? d->iface->currentSelectedItems().size() : 0;
+
+    if (count == 0)
+    {
+        d->status->setText(QStringLiteral("No images selected in digiKam."));
+        return;
+    }
+
+    const QString target = currentSourceName();
+    QString text = QStringLiteral("%1 image%2 selected will be uploaded")
+                       .arg(count)
+                       .arg(count == 1 ? QString() : QStringLiteral("s"));
+    text += target.isEmpty() ? QStringLiteral(" to the library.")
+                             : QStringLiteral(" to '%1'.").arg(target);
+    d->status->setText(text);
 }
 
 void ImmichWindow::slotSaveSettings()
@@ -883,7 +973,17 @@ void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
 
     selectSource(restoreId);
     applyFilter();
-    d->status->setText(QStringLiteral("%1 albums").arg(albums.size()));
+
+    if (d->mode == Mode::Export)
+    {
+        // The album count is not the interesting number here;
+        // the status reports the upload set instead.
+        updateExportStatus();
+    }
+    else
+    {
+        d->status->setText(QStringLiteral("%1 albums").arg(albums.size()));
+    }
 }
 
 void ImmichWindow::slotUploadSelection()

@@ -24,6 +24,7 @@
 #include <QPixmap>
 
 class QListWidgetItem;
+class QShowEvent;
 
 // Local includes
 
@@ -77,6 +78,10 @@ public:
 
     void setPlugin(DPlugin* const plugin);
 
+protected:
+
+    void showEvent(QShowEvent* event) override;
+
 private Q_SLOTS:
 
     void slotSaveSettings();
@@ -123,6 +128,8 @@ private:
     void dropThumbJobs(bool covers);
     void startPreview(const QString& sourceId);
     void fillPreview();
+    void fillUploadPreview();
+    void updateExportStatus();
     void nextUpload();
     void finishUpload();
     void nextDownload();
