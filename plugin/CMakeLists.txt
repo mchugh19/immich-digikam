@@ -8,12 +8,10 @@
 # Piwigo's: server URL + API key instead of a login session, JSON
 # over HTTPS, multipart uploads with a sidecarData part.
 #
-# Status: scaffold. Written against the digiKam plugin API as of
-# digiKam master (Qt6/KF6) but not yet compiled: the first build task
-# is to build it in a Fedora container with digikam-devel installed,
-# confirm the exported DigikamCore CMake targets and the plugin
-# install path below, and pin the minimum digiKam version to the one
-# in daily use.
+# Status: scaffold, CMake side verified against digikam-devel
+# 9.1.0. First compile runs in a Fedora container with
+# digikam-devel installed (or Christian's Fedora toolbox, which
+# carries the same digikam 9.1.0).
 #
 
 cmake_minimum_required(VERSION 3.16)
@@ -29,9 +27,12 @@ find_package(KF6Config REQUIRED)
 find_package(KF6I18n REQUIRED)
 
 # Provides the DPluginGeneric headers and the digiKam core library.
-# TODO(first build): confirm package/target names from the installed
-# DigikamCoreConfig.cmake and adjust.
+# Target names and install paths verified against the installed
+# digikam-devel 9.1.0 packages (Fedora): the core target is
+# Digikam::digikamcore, and DigikamPlugin's config provides
+# DPluginGenericInstallPath (/usr/lib64/qt6/plugins/digikam/generic).
 find_package(DigikamCore REQUIRED)
+find_package(DigikamPlugin REQUIRED)
 
 add_library(generic_immich MODULE
     immichplugin.cpp
@@ -42,15 +43,12 @@ add_library(generic_immich MODULE
 
 target_link_libraries(generic_immich
     PRIVATE
-        Digikam::core
+        Digikam::digikamcore
         Qt6::Widgets
         Qt6::Network
         KF6::ConfigCore
         KF6::I18n
 )
 
-# TODO(first build): confirm the generic-plugin install directory
-# for the target digiKam version.
-include(GNUInstallDirs)
 install(TARGETS generic_immich
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/qt6/plugins/digikam/generic)
+        DESTINATION ${DPluginGenericInstallPath})
