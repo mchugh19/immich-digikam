@@ -28,6 +28,7 @@ public:
 
     QString url;
     QString apiKey;
+    QString downloadDir;
 };
 
 ImmichSession::ImmichSession()
@@ -50,6 +51,11 @@ QString ImmichSession::apiKey() const
     return d->apiKey;
 }
 
+QString ImmichSession::downloadDir() const
+{
+    return d->downloadDir;
+}
+
 void ImmichSession::setUrl(const QString& url)
 {
     d->url = url;
@@ -60,19 +66,26 @@ void ImmichSession::setApiKey(const QString& apiKey)
     d->apiKey = apiKey;
 }
 
+void ImmichSession::setDownloadDir(const QString& dir)
+{
+    d->downloadDir = dir;
+}
+
 void ImmichSession::save()
 {
     KConfigGroup group = KSharedConfig::openConfig()->group(QStringLiteral("Immich Settings"));
     group.writeEntry("ServerUrl", d->url);
     group.writeEntry("ApiKey", d->apiKey);
+    group.writeEntry("DownloadDir", d->downloadDir);
     group.sync();
 }
 
 void ImmichSession::load()
 {
     KConfigGroup group = KSharedConfig::openConfig()->group(QStringLiteral("Immich Settings"));
-    d->url    = group.readEntry("ServerUrl", QString());
-    d->apiKey = group.readEntry("ApiKey", QString());
+    d->url         = group.readEntry("ServerUrl", QString());
+    d->apiKey      = group.readEntry("ApiKey", QString());
+    d->downloadDir = group.readEntry("DownloadDir", QString());
 }
 
 } // namespace DigikamGenericImmichPlugin

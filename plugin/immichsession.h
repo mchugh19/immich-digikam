@@ -40,8 +40,12 @@ public:
     QString url()    const;
     QString apiKey() const;
 
+    /** Last folder an album was downloaded to (dialog start). */
+    QString downloadDir() const;
+
     void setUrl(const QString& url);
     void setApiKey(const QString& apiKey);
+    void setDownloadDir(const QString& dir);
 
     void save();
     void load();

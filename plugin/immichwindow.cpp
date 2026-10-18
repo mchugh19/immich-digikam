@@ -488,13 +488,18 @@ void ImmichWindow::slotDownloadAlbum()
         return;
     }
 
+    const QString startDir = d->session->downloadDir().isEmpty() ? QDir::homePath()
+                                                                 : d->session->downloadDir();
     const QString dir = QFileDialog::getExistingDirectory(
-        this, QStringLiteral("Download album to"), QDir::homePath());
+        this, QStringLiteral("Download album to"), startDir);
 
     if (dir.isEmpty())
     {
         return;
     }
+
+    d->session->setDownloadDir(dir);
+    d->session->save();
 
     d->dlDir         = dir;
     d->dlPending.clear();
