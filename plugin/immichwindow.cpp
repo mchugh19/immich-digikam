@@ -299,6 +299,11 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->tagGrid->setVisible(false);
     d->previewList      = new QListWidget;
     d->previewList->setViewMode(QListWidget::IconMode);
+    // Display only: Download always takes the whole album or
+    // tag, so the preview must not offer a selection that
+    // suggests individual pictures can be picked.
+    d->previewList->setSelectionMode(QAbstractItemView::NoSelection);
+    d->previewList->setFocusPolicy(Qt::NoFocus);
     d->previewList->setIconSize(QSize(96, 96));
     // Fixed cell size: items are created before their thumbnails
     // stream in, and without a grid size the widget sizes cells
