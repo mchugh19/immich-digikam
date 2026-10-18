@@ -65,8 +65,8 @@ digiKam master tree on 2026-10-18.
    `handbookSection()` ("export_tools") and `handbookChapter()`
    ("immich_export"), and the manual chapter itself lives in the
    separate digikam documentation repository. Status: hooks
-   **addressed in this repo** if the 9.1 headers expose the
-   virtuals (checked before adding); the manual chapter is a
+   **addressed in this repo** (the 9.1 headers expose the
+   virtuals, verified before adding); the manual chapter is a
    follow-up contribution of its own.
 
 6. **Web-services framework dialog.** In-tree web-service windows
