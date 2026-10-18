@@ -28,6 +28,10 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 
+// KDE includes
+
+#include <klocalizedstring.h>
+
 // Local includes
 
 #include "immichsession.h"
@@ -185,7 +189,7 @@ void ImmichTalker::uploadAsset(const QString& filePath, const QString& sidecarPa
     auto* const file = new QFile(filePath, multiPart);
     if (!file->open(QIODevice::ReadOnly))
     {
-        Q_EMIT signalError(QStringLiteral("Cannot open %1").arg(filePath));
+        Q_EMIT signalError(i18n("Cannot open %1", filePath));
         delete multiPart;
         return;
     }

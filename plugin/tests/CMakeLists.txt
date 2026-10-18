@@ -13,6 +13,7 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Test)
 find_package(KF6Config REQUIRED)
+find_package(KF6I18n REQUIRED)
 
 enable_testing()
 
@@ -28,6 +29,6 @@ add_executable(test_talker_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../immichsession.cpp)
 target_include_directories(test_talker_contract PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(test_talker_contract PRIVATE
-    Qt6::Core Qt6::Network Qt6::Test KF6::ConfigCore)
+    Qt6::Core Qt6::Network Qt6::Test KF6::ConfigCore KF6::I18n)
 
 add_test(NAME talker_contract COMMAND test_talker_contract)

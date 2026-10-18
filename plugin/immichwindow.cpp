@@ -50,6 +50,10 @@
 #include <QStandardPaths>
 #include <QVBoxLayout>
 
+// KDE includes
+
+#include <klocalizedstring.h>
+
 // Local includes
 
 #include "dinfointerface.h"
@@ -345,8 +349,8 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
         }
     }
 
-    setWindowTitle(d->mode == Mode::Export ? QStringLiteral("Export to Immich")
-                                           : QStringLiteral("Import from Immich"));
+    setWindowTitle(d->mode == Mode::Export ? i18n("Export to Immich")
+                                           : i18n("Import from Immich"));
 
     // A functional default: the source tiles and the preview grid
     // are the working area, and both are cramped at the layout's
@@ -359,27 +363,27 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->urlEdit->setPlaceholderText(QStringLiteral("https://photos.example.com"));
     d->keyEdit = new QLineEdit(d->session->apiKey());
     d->keyEdit->setEchoMode(QLineEdit::Password);
-    form->addRow(QStringLiteral("Server URL:"), d->urlEdit);
-    form->addRow(QStringLiteral("API key:"), d->keyEdit);
+    form->addRow(i18n("Server URL:"), d->urlEdit);
+    form->addRow(i18n("API key:"), d->keyEdit);
     // What happens to the previous copy when a photo edited in
     // digiKam is exported again: stack the new version over it
     // (nothing is deleted) or overwrite it (old copy to trash).
     // Metadata-only changes never reach this choice: they sync.
     d->replaceCombo = new QComboBox;
-    d->replaceCombo->addItem(QStringLiteral("Stack the new version over the old"),
+    d->replaceCombo->addItem(i18n("Stack the new version over the old"),
                              QStringLiteral("stack"));
-    d->replaceCombo->addItem(QStringLiteral("Overwrite (old copy to Immich's trash)"),
+    d->replaceCombo->addItem(i18n("Overwrite (old copy to Immich's trash)"),
                              QStringLiteral("trash"));
     d->replaceCombo->setCurrentIndex(
         d->session->replaceMode() == QStringLiteral("trash") ? 1 : 0);
-    form->addRow(QStringLiteral("Edited photos:"), d->replaceCombo);
+    form->addRow(i18n("Edited photos:"), d->replaceCombo);
 
-    auto* const saveBtn = new QPushButton(QStringLiteral("Save settings"));
-    d->refreshBtn       = new QPushButton(QStringLiteral("Refresh albums"));
-    d->newAlbumBtn      = new QPushButton(QStringLiteral("New album..."));
-    d->uploadBtn        = new QPushButton(QStringLiteral("Upload selection"));
-    d->downloadBtn      = new QPushButton(QStringLiteral("Download"));
-    d->cancelBtn        = new QPushButton(QStringLiteral("Cancel transfer"));
+    auto* const saveBtn = new QPushButton(i18n("Save settings"));
+    d->refreshBtn       = new QPushButton(i18n("Refresh albums"));
+    d->newAlbumBtn      = new QPushButton(i18n("New album..."));
+    d->uploadBtn        = new QPushButton(i18n("Upload selection"));
+    d->downloadBtn      = new QPushButton(i18n("Download"));
+    d->cancelBtn        = new QPushButton(i18n("Cancel transfer"));
     d->cancelBtn->setEnabled(false);
 
     // Standard theme icons, the ones digiKam's own dialogs use
@@ -408,10 +412,10 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     // leaving a clipped row and a scrollbar for a single row.
     d->albumGrid->setMinimumHeight(248 + 16);
     d->filterEdit       = new QLineEdit;
-    d->filterEdit->setPlaceholderText(QStringLiteral("Filter..."));
+    d->filterEdit->setPlaceholderText(i18n("Filter..."));
     d->filterEdit->setClearButtonEnabled(true);
-    d->albumsSrc        = new QRadioButton(QStringLiteral("Albums"));
-    d->tagsSrc          = new QRadioButton(QStringLiteral("Tags"));
+    d->albumsSrc        = new QRadioButton(i18n("Albums"));
+    d->tagsSrc          = new QRadioButton(i18n("Tags"));
     d->albumsSrc->setChecked(true);
     // Tags carry no counts or dates: they get a simpler tile
     // grid like Immich's own Tags page, swapped in for the album
@@ -447,12 +451,12 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->previewList->setUniformItemSizes(true);
     d->previewList->setWordWrap(true);
     d->previewSort      = new QComboBox;
-    d->previewSort->addItems({ QStringLiteral("Date (oldest first)"),
-                               QStringLiteral("Date (newest first)"),
-                               QStringLiteral("Name") });
-    d->targetLabel      = new QLabel(QStringLiteral("Upload target: no album (library only)"));
-    d->libraryRadio     = new QRadioButton(QStringLiteral("Library only"));
-    d->albumRadio       = new QRadioButton(QStringLiteral("Album"));
+    d->previewSort->addItems({ i18n("Date (oldest first)"),
+                               i18n("Date (newest first)"),
+                               i18n("Name") });
+    d->targetLabel      = new QLabel(i18n("Upload target: no album (library only)"));
+    d->libraryRadio     = new QRadioButton(i18n("Library only"));
+    d->albumRadio       = new QRadioButton(i18n("Album"));
     d->albumRadio->setChecked(d->session->exportTargetMode() == QStringLiteral("album"));
     d->libraryRadio->setChecked(!d->albumRadio->isChecked());
     d->progress         = new QProgressBar;
@@ -469,13 +473,13 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->downloadBtn->setVisible(d->mode == Mode::Import);
 
     auto* const sourceRow = new QHBoxLayout;
-    sourceRow->addWidget(new QLabel(QStringLiteral("Import from:")));
+    sourceRow->addWidget(new QLabel(i18n("Import from:")));
     sourceRow->addWidget(d->albumsSrc);
     sourceRow->addWidget(d->tagsSrc);
     sourceRow->addStretch();
 
     auto* const previewRow = new QHBoxLayout;
-    previewRow->addWidget(new QLabel(QStringLiteral("Contents:")));
+    previewRow->addWidget(new QLabel(i18n("Contents:")));
     previewRow->addWidget(d->previewSort);
     previewRow->addStretch();
 
@@ -507,7 +511,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
         // library export gives the whole window height to the
         // selection preview.
         auto* const targetGroup = new QVBoxLayout;
-        targetGroup->addWidget(new QLabel(QStringLiteral("Upload to")));
+        targetGroup->addWidget(new QLabel(i18n("Upload to")));
 
         auto* const targetRadios = new QVBoxLayout;
         targetRadios->setContentsMargins(24, 0, 0, 0);
@@ -541,7 +545,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     {
         // The export tool's preview is the upload set itself:
         // the images currently selected in digiKam.
-        layout->addWidget(new QLabel(QStringLiteral("Images selected in digiKam:")));
+        layout->addWidget(new QLabel(i18n("Images selected in digiKam:")));
         layout->addWidget(d->previewList, 3);
     }
 
@@ -739,16 +743,15 @@ void ImmichWindow::updateExportStatus()
 
     if (count == 0)
     {
-        d->status->setText(QStringLiteral("No images selected in digiKam."));
+        d->status->setText(i18n("No images selected in digiKam."));
         return;
     }
 
     const QString target = currentSourceName();
-    QString text = QStringLiteral("%1 image%2 selected will be uploaded")
-                       .arg(count)
-                       .arg(count == 1 ? QString() : QStringLiteral("s"));
-    text += target.isEmpty() ? QStringLiteral(" to the library.")
-                             : QStringLiteral(" to '%1'.").arg(target);
+    QString text = i18np("%1 image selected will be uploaded",
+                         "%1 images selected will be uploaded", count);
+    text += target.isEmpty() ? i18n(" to the library.")
+                             : i18n(" to '%1'.").arg(target);
     d->status->setText(text);
 }
 
@@ -757,7 +760,7 @@ void ImmichWindow::slotSaveSettings()
     d->session->setUrl(d->urlEdit->text());
     d->session->setApiKey(d->keyEdit->text());
     d->session->save();
-    d->status->setText(QStringLiteral("Settings saved."));
+    d->status->setText(i18n("Settings saved."));
 }
 
 QListWidgetItem* ImmichWindow::findAlbumItem(const QString& id) const
@@ -822,8 +825,8 @@ void ImmichWindow::updateTargetLabel()
 
     const QString name = currentSourceName();
     d->targetLabel->setText(name.isEmpty()
-                                ? QStringLiteral("Upload target: no album (library only)")
-                                : QStringLiteral("Upload target: %1").arg(name));
+                                ? i18n("Upload target: no album (library only)")
+                                : i18n("Upload target: %1").arg(name));
 }
 
 void ImmichWindow::setAlbumCover(QListWidgetItem* item, const QPixmap& pix)
@@ -881,7 +884,7 @@ void ImmichWindow::addAlbumTile(const QString& id, const QString& name,
 
     if (!countText.isEmpty())
     {
-        auto* const countLabel = new QLabel(QStringLiteral("%1 items").arg(countText));
+        auto* const countLabel = new QLabel(i18n("%1 items").arg(countText));
         countLabel->setObjectName(QStringLiteral("sub"));
         countLabel->setStyleSheet(QStringLiteral("color: #9a9a9a;"));
         tileLayout->addWidget(countLabel);
@@ -1149,7 +1152,7 @@ void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
     }
 
     applyFilter();
-    d->status->setText(QStringLiteral("%1 tags").arg(tags.size()));
+    d->status->setText(i18n("%1 tags").arg(tags.size()));
 }
 
 void ImmichWindow::setTransferButtonsEnabled(bool enabled)
@@ -1171,8 +1174,8 @@ void ImmichWindow::slotNewAlbum()
     d->session->setApiKey(d->keyEdit->text());
 
     bool ok = false;
-    const QString name = QInputDialog::getText(this, QStringLiteral("New album"),
-                                               QStringLiteral("Album name:"),
+    const QString name = QInputDialog::getText(this, i18n("New album"),
+                                               i18n("Album name:"),
                                                QLineEdit::Normal, QString(), &ok).trimmed();
 
     if (!ok || name.isEmpty())
@@ -1180,7 +1183,7 @@ void ImmichWindow::slotNewAlbum()
         return;
     }
 
-    d->status->setText(QStringLiteral("Creating album..."));
+    d->status->setText(i18n("Creating album..."));
     d->talker->createAlbum(name);
 }
 
@@ -1189,7 +1192,7 @@ void ImmichWindow::slotAlbumCreated(const ImmichAlbum& album)
     // Refresh the list and land the selection on the new album,
     // ready to be the upload target.
     d->pendingSelectId = album.id;
-    d->status->setText(QStringLiteral("Album '%1' created.").arg(album.name));
+    d->status->setText(i18n("Album '%1' created.").arg(album.name));
     d->talker->listAlbums();
 }
 
@@ -1227,7 +1230,7 @@ void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
     }
     else
     {
-        d->status->setText(QStringLiteral("%1 albums").arg(albums.size()));
+        d->status->setText(i18n("%1 albums").arg(albums.size()));
     }
 }
 
@@ -1246,7 +1249,7 @@ void ImmichWindow::slotUploadSelection()
 
     if (items.isEmpty())
     {
-        d->status->setText(QStringLiteral("No items selected in digiKam."));
+        d->status->setText(i18n("No items selected in digiKam."));
         return;
     }
 
@@ -1327,7 +1330,7 @@ void ImmichWindow::slotUploadSelection()
     if (!checksums.isEmpty())
     {
         d->checking = true;
-        d->status->setText(QStringLiteral("Checking which files are already on the server..."));
+        d->status->setText(i18n("Checking which files are already on the server..."));
         d->talker->checkUploads(checksums);
         return;
     }
@@ -1392,7 +1395,7 @@ void ImmichWindow::nextIdentity()
 
     d->identityUrl = d->identityQueue.takeFirst();
     const QString path = d->identityUrl.toLocalFile();
-    d->status->setText(QStringLiteral("Checking for an existing copy of %1...")
+    d->status->setText(i18n("Checking for an existing copy of %1...")
                            .arg(QFileInfo(path).fileName()));
 
     // Pass 1 scopes the search to the album being exported to:
@@ -1580,7 +1583,7 @@ void ImmichWindow::nextUpload()
         return;
     }
 
-    d->status->setText(QStringLiteral("Uploading %1 (%2 of %3)")
+    d->status->setText(i18n("Uploading %1 (%2 of %3)")
                            .arg(info.fileName())
                            .arg(d->done + 1)
                            .arg(d->total));
@@ -1605,7 +1608,7 @@ void ImmichWindow::slotCancelTransfer()
     d->identityQueue.clear();
     d->identityWaitingThumb = false;
     d->restoring = false;
-    d->status->setText(QStringLiteral("Cancelling..."));
+    d->status->setText(i18n("Cancelling..."));
     d->talker->cancel();
 }
 
@@ -1680,7 +1683,7 @@ void ImmichWindow::finishUpload()
     if (d->cancelling)
     {
         d->cancelling = false;
-        d->status->setText(QStringLiteral("Upload cancelled after %1 of %2 items.")
+        d->status->setText(i18n("Upload cancelled after %1 of %2 items.")
                                .arg(d->done)
                                .arg(d->total));
         return;
@@ -1688,7 +1691,7 @@ void ImmichWindow::finishUpload()
 
     if (!d->targetAlbumId.isEmpty() && !d->uploadedIds.isEmpty())
     {
-        d->status->setText(QStringLiteral("Adding %1 items to the album...")
+        d->status->setText(i18n("Adding %1 items to the album...")
                                .arg(d->uploadedIds.size()));
         d->talker->addToAlbum(d->targetAlbumId, d->uploadedIds);
         return;
@@ -1732,7 +1735,7 @@ void ImmichWindow::startRestoreOrSync()
     // does the metadata sync start.
     d->restoring    = true;
     d->restoreQueue = d->replaces;
-    d->status->setText(QStringLiteral("Replacing %1 edited photo(s) in Immich...")
+    d->status->setText(i18n("Replacing %1 edited photo(s) in Immich...")
                            .arg(d->restoreQueue.size()));
     restoreNext();
 }
@@ -1909,8 +1912,8 @@ void ImmichWindow::slotAssetsDeleted(int httpStatus)
 void ImmichWindow::printUploadSummary()
 {
     QString text = d->albumAssigned
-        ? QStringLiteral("Uploaded %1 of %2 items (%3 already on the server, %4 failed) and added them to the album.")
-        : QStringLiteral("Uploaded %1 of %2 items (%3 already on the server, %4 failed).");
+        ? i18n("Uploaded %1 of %2 items (%3 already on the server, %4 failed) and added them to the album.")
+        : i18n("Uploaded %1 of %2 items (%3 already on the server, %4 failed).");
 
     text = text.arg(d->done - d->failed - d->alreadyThere)
                .arg(d->total)
@@ -1919,54 +1922,60 @@ void ImmichWindow::printUploadSummary()
 
     if (d->matchedSync > 0)
     {
-        text += QStringLiteral(" %1 photo%2 synced metadata.")
-                    .arg(d->matchedSync)
-                    .arg(d->matchedSync == 1 ? QString() : QStringLiteral("s"));
+        text += i18np(" %1 photo synced metadata.",
+                      " %1 photos synced metadata.", d->matchedSync);
 
         if (d->matchedMulti > 0)
         {
-            text += QStringLiteral(" (%1 had several copies on the server; the newest was used.)")
+            text += i18n(" (%1 had several copies on the server; the newest was used.)")
                         .arg(d->matchedMulti);
         }
     }
 
     if (d->stackedCount > 0)
     {
-        text += QStringLiteral(" %1 edited photo(s) replaced their Immich copy,"
-                               " stacked as the new primary over the previous version.")
-                    .arg(d->stackedCount);
+        text += i18np(" %1 edited photo replaced its Immich copy,"
+                      " stacked as the new primary over the previous version.",
+                      " %1 edited photos replaced their Immich copies,"
+                      " stacked as the new primary over the previous version.",
+                      d->stackedCount);
     }
 
     if (d->overwriteCount > 0)
     {
-        text += QStringLiteral(" %1 edited photo(s) replaced their Immich copy"
-                               " (the old copies are in Immich's trash).")
-                    .arg(d->overwriteCount);
+        text += i18np(" %1 edited photo replaced its Immich copy"
+                      " (the old copy is in Immich's trash).",
+                      " %1 edited photos replaced their Immich copies"
+                      " (the old copies are in Immich's trash).",
+                      d->overwriteCount);
     }
 
     if (d->trashFallbackCount > 0)
     {
-        text += QStringLiteral(" %1 replaced photo(s) could not be stacked;"
-                               " their old copies are in Immich's trash.")
-                    .arg(d->trashFallbackCount);
+        text += i18np(" %1 replaced photo could not be stacked;"
+                      " its old copy is in Immich's trash.",
+                      " %1 replaced photos could not be stacked;"
+                      " their old copies are in Immich's trash.",
+                      d->trashFallbackCount);
     }
 
     if (d->syncRan)
     {
-        text += QStringLiteral(" Metadata synced for %1 already-uploaded items (%2 unchanged, %3 failed).")
+        text += i18n(" Metadata synced for %1 already-uploaded items (%2 unchanged, %3 failed).")
                     .arg(d->syncUpdated)
                     .arg(d->syncClean)
                     .arg(d->syncFailed);
 
         if (d->syncConflicts > 0)
         {
-            text += QStringLiteral(" %1 conflict(s) settled by timestamp.")
-                        .arg(d->syncConflicts);
+            text += i18np(" %1 conflict settled by timestamp.",
+                            " %1 conflicts settled by timestamp.",
+                            d->syncConflicts);
         }
 
         if (d->syncPermsDenied)
         {
-            text += QStringLiteral(" Metadata sync was refused: the API key also needs"
+            text += i18n(" Metadata sync was refused: the API key also needs"
                                    " asset.update, tag.create and tag.asset.");
         }
     }
@@ -1988,7 +1997,7 @@ void ImmichWindow::maybeStartSync()
     d->syncFetchInFlight = 0;
     d->syncPatchInFlight = 0;
     d->syncProcessed = 0;
-    d->status->setText(QStringLiteral("Syncing metadata for %1 already-uploaded items...")
+    d->status->setText(i18n("Syncing metadata for %1 already-uploaded items...")
                            .arg(d->syncJobs.size()));
     pumpSyncFetches();
 }
@@ -2246,7 +2255,7 @@ void ImmichWindow::startSyncTags()
     }
 
     d->tagsPurpose = Private::TagsPurpose::Sync;
-    d->status->setText(QStringLiteral("Syncing tags..."));
+    d->status->setText(i18n("Syncing tags..."));
     d->talker->listTags();
 }
 
@@ -2428,14 +2437,14 @@ void ImmichWindow::slotDownloadAlbum()
 
     if (sourceId.isEmpty())
     {
-        d->status->setText(QStringLiteral("Select an album or tag to download."));
+        d->status->setText(i18n("Select an album or tag to download."));
         return;
     }
 
     const QString startDir = d->session->downloadDir().isEmpty() ? QDir::homePath()
                                                                  : d->session->downloadDir();
     const QString dir = QFileDialog::getExistingDirectory(
-        this, QStringLiteral("Download to"), startDir);
+        this, i18n("Download to"), startDir);
 
     if (dir.isEmpty())
     {
@@ -2466,7 +2475,7 @@ void ImmichWindow::slotDownloadAlbum()
 
     setTransferButtonsEnabled(false);
     d->cancelBtn->setEnabled(true);
-    d->status->setText(QStringLiteral("Listing assets..."));
+    d->status->setText(i18n("Listing assets..."));
 
     if (d->sourceIsTags)
     {
@@ -2509,7 +2518,7 @@ void ImmichWindow::startPreview(const QString& sourceId)
     d->previewAssets.clear();
     dropThumbJobs(false);
     d->listingPurpose = Private::ListingPurpose::Preview;
-    d->status->setText(QStringLiteral("Listing contents..."));
+    d->status->setText(i18n("Listing contents..."));
 
     if (d->sourceIsTags)
     {
@@ -2578,7 +2587,7 @@ void ImmichWindow::fillPreview()
     }
 
     applyFilter();
-    d->status->setText(QStringLiteral("%1 items").arg(sorted.size()));
+    d->status->setText(i18n("%1 items").arg(sorted.size()));
 }
 
 void ImmichWindow::slotPreviewSortChanged()
@@ -2761,7 +2770,7 @@ void ImmichWindow::nextMeta()
 {
     const QPair<QString, QString> item = d->metaPending.takeFirst();
 
-    d->status->setText(QStringLiteral("Refreshing metadata for existing files (%1 of %2)")
+    d->status->setText(i18n("Refreshing metadata for existing files (%1 of %2)")
                            .arg(d->metaDone + 1)
                            .arg(d->metaTotal));
 
@@ -2798,7 +2807,7 @@ void ImmichWindow::nextDownload()
 {
     const ImmichAssetRef asset = d->dlPending.takeFirst();
 
-    d->status->setText(QStringLiteral("Downloading %1 (%2 of %3)")
+    d->status->setText(i18n("Downloading %1 (%2 of %3)")
                            .arg(asset.fileName)
                            .arg(d->dlDone + 1)
                            .arg(d->dlTotal));
@@ -2933,13 +2942,13 @@ void ImmichWindow::finishDownload()
     if (d->cancelling)
     {
         d->cancelling = false;
-        d->status->setText(QStringLiteral("Download cancelled after %1 of %2 assets.")
+        d->status->setText(i18n("Download cancelled after %1 of %2 assets.")
                                .arg(d->dlDone)
                                .arg(d->dlTotal));
         return;
     }
 
-    QString summary = QStringLiteral("Downloaded %1 assets (%2 already on disk, %3 failed) to %4")
+    QString summary = i18n("Downloaded %1 assets (%2 already on disk, %3 failed) to %4")
                           .arg(d->dlDownloaded)
                           .arg(d->dlSkipped)
                           .arg(d->dlFailed)
@@ -2947,7 +2956,7 @@ void ImmichWindow::finishDownload()
 
     if (d->metaUpdated > 0)
     {
-        summary += QStringLiteral("; metadata refreshed for %1 existing files").arg(d->metaUpdated);
+        summary += i18n("; metadata refreshed for %1 existing files").arg(d->metaUpdated);
     }
 
     d->status->setText(summary);
@@ -2979,7 +2988,7 @@ void ImmichWindow::slotError(const QString& msg)
         // The duplicate check is an optimisation; if it fails,
         // upload everything the original way.
         d->checking = false;
-        d->status->setText(QStringLiteral("Duplicate check failed (%1); uploading everything.").arg(msg));
+        d->status->setText(i18n("Duplicate check failed (%1); uploading everything.").arg(msg));
         nextUpload();
         return;
     }
@@ -3017,7 +3026,7 @@ void ImmichWindow::slotError(const QString& msg)
         ++d->failed;
         ++d->done;
         d->progress->setValue(d->done);
-        d->status->setText(QStringLiteral("Failed: %1").arg(msg));
+        d->status->setText(i18n("Failed: %1").arg(msg));
         nextUpload();
         return;
     }

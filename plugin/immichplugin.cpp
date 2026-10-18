@@ -40,7 +40,7 @@ ImmichPlugin::~ImmichPlugin()
 
 QString ImmichPlugin::name() const
 {
-    return i18n("Immich");
+    return i18nc("@title", "Immich");
 }
 
 QString ImmichPlugin::iid() const
@@ -59,16 +59,26 @@ QIcon ImmichPlugin::icon() const
 
 QString ImmichPlugin::description() const
 {
-    return i18n("A tool to export and import items with an Immich web-service");
+    return i18nc("@info", "A tool to export and import items with an Immich web-service");
 }
 
 QString ImmichPlugin::details() const
 {
-    return i18n("<p>This tool permits to pull albums from a self-hosted Immich server "
+    return i18nc("@info", "<p>This tool permits to pull albums from a self-hosted Immich server "
                 "into digiKam and to push finished items back.</p>"
                 "<p>Metadata (tags, rating, caption, GPS) round-trips through XMP "
                 "sidecar files, which both digiKam and Immich read and write.</p>"
                 "<p>See the Immich web site for details: <a href='https://immich.app/'>https://immich.app/</a></p>");
+}
+
+QString ImmichPlugin::handbookSection() const
+{
+    return QLatin1String("export_tools");
+}
+
+QString ImmichPlugin::handbookChapter() const
+{
+    return QLatin1String("immich_export");
 }
 
 QList<DPluginAuthor> ImmichPlugin::authors() const
