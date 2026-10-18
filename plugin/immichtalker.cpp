@@ -69,6 +69,16 @@ QNetworkRequest ImmichTalker::makeRequest(const QString& path) const
         base.chop(1);
     }
 
+    // The session stores the server root URL, the way every Immich
+    // client expects it entered; the REST API lives below /api.
+    // Without this the requests land on the web frontend, which
+    // answers JSON-only requests with 406.
+
+    if (!base.endsWith(QLatin1String("/api")))
+    {
+        base += QLatin1String("/api");
+    }
+
     QNetworkRequest req(QUrl(base + path));
     req.setRawHeader("x-api-key", d->session->apiKey().toUtf8());
     req.setRawHeader("Accept", "application/json");
