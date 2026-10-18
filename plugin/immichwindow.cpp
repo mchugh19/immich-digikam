@@ -53,6 +53,7 @@ public:
     QLineEdit*    urlEdit     = nullptr;
     QLineEdit*    keyEdit     = nullptr;
     QListWidget*  albumList   = nullptr;
+    QLabel*       targetLabel = nullptr;
     QLabel*       status      = nullptr;
     QPushButton*  refreshBtn  = nullptr;
     QPushButton*  uploadBtn   = nullptr;
@@ -105,6 +106,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
     d->uploadBtn        = new QPushButton(QStringLiteral("Upload selection"));
     d->downloadBtn      = new QPushButton(QStringLiteral("Download album"));
     d->albumList        = new QListWidget;
+    d->targetLabel      = new QLabel(QStringLiteral("Upload target: no album (library only)"));
     d->progress         = new QProgressBar;
     d->progress->setVisible(false);
     d->status           = new QLabel;
@@ -114,6 +116,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
     layout->addWidget(saveBtn);
     layout->addWidget(d->refreshBtn);
     layout->addWidget(d->albumList);
+    layout->addWidget(d->targetLabel);
     layout->addWidget(d->uploadBtn);
     layout->addWidget(d->downloadBtn);
     layout->addWidget(d->progress);
@@ -122,6 +125,13 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
     connect(saveBtn, &QPushButton::clicked, this, &ImmichWindow::slotSaveSettings);
     connect(d->refreshBtn, &QPushButton::clicked, this, &ImmichWindow::slotRefreshAlbums);
     connect(d->uploadBtn, &QPushButton::clicked, this, &ImmichWindow::slotUploadSelection);
+    connect(d->albumList, &QListWidget::currentItemChanged, this,
+            [this](QListWidgetItem* current, QListWidgetItem*)
+            {
+                d->targetLabel->setText(current
+                    ? QStringLiteral("Upload target: %1").arg(current->data(Qt::UserRole + 1).toString())
+                    : QStringLiteral("Upload target: no album (library only)"));
+            });
     connect(d->downloadBtn, &QPushButton::clicked, this, &ImmichWindow::slotDownloadAlbum);
     connect(d->talker, &ImmichTalker::signalAlbums, this, &ImmichWindow::slotAlbums);
     connect(d->talker, &ImmichTalker::signalAlbumAssets, this, &ImmichWindow::slotAlbumAssets);
@@ -168,6 +178,7 @@ void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
         auto* const item = new QListWidgetItem(
             QStringLiteral("%1 (%2)").arg(album.name).arg(album.assetCount), d->albumList);
         item->setData(Qt::UserRole, album.id);
+        item->setData(Qt::UserRole + 1, album.name);
     }
 
     d->status->setText(QStringLiteral("%1 albums").arg(albums.size()));
