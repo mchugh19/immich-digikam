@@ -3,6 +3,10 @@
  * This file is a part of the immich-digikam project
  * https://github.com/mchugh19/immich-digikam
  *
+ * Description : a digiKam plugin to sync albums with an Immich
+ *               web-service (pull originals, push finished files,
+ *               metadata round-trips through XMP sidecars).
+ *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version
@@ -36,11 +40,13 @@ class ImmichSession;
 class ImmichTalker;
 
 /**
- * Tool dialog: connection settings (server URL + API key) and the
- * server's album list. Album selection is where pull and push will
- * operate; the item transfer itself is the next step after this
- * scaffold compiles (it needs the DInfoInterface selection and
- * digiKam's metadata engine for sidecar generation).
+ * Tool dialog: connection settings (server URL + API key), the
+ * server's album list, and the push action. Upload sends the
+ * items currently selected in digiKam, each with its XMP sidecar:
+ * an on-disk sidecar when one exists next to the file, otherwise
+ * the file's embedded XMP packet written to a temporary sidecar.
+ * When an album is selected in the list, the uploaded items are
+ * added to it.
  */
 class ImmichWindow : public QDialog
 {
@@ -58,10 +64,17 @@ private Q_SLOTS:
     void slotSaveSettings();
     void slotRefreshAlbums();
     void slotAlbums(const QList<ImmichAlbum>& albums);
+    void slotUploadSelection();
+    void slotUploadSucceeded(const QString& assetId, const QString& status);
+    void slotAlbumUpdated();
     void slotError(const QString& msg);
     void slotBusy(bool val);
 
 private:
+
+    void nextUpload();
+    void finishUpload();
+    QString sidecarFor(const QString& filePath);
 
     class Private;
     Private* const d;
