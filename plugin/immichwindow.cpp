@@ -377,6 +377,16 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->downloadBtn      = new QPushButton(QStringLiteral("Download"));
     d->cancelBtn        = new QPushButton(QStringLiteral("Cancel transfer"));
     d->cancelBtn->setVisible(false);
+
+    // Standard theme icons, the ones digiKam's own dialogs use
+    // for the same actions, so the window sits naturally in the
+    // host's icon theme.
+    saveBtn->setIcon(QIcon::fromTheme(QStringLiteral("document-save")));
+    d->refreshBtn->setIcon(QIcon::fromTheme(QStringLiteral("view-refresh")));
+    d->newAlbumBtn->setIcon(QIcon::fromTheme(QStringLiteral("folder-new")));
+    d->uploadBtn->setIcon(QIcon::fromTheme(QStringLiteral("go-up")));
+    d->downloadBtn->setIcon(QIcon::fromTheme(QStringLiteral("go-down")));
+    d->cancelBtn->setIcon(QIcon::fromTheme(QStringLiteral("process-stop")));
     // Albums are tiles, like Immich's own Albums page: a large
     // cover, the name under it in a larger font, then the date
     // range and the item count in smaller type. Each tile is a
