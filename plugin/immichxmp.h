@@ -5,7 +5,10 @@
 
 #include <QString>
 #include <QStringList>
+#include <QXmlStreamReader>
 #include <QtGlobal>
+
+#include <functional>
 
 namespace DigikamGenericImmichPlugin
 {
@@ -85,6 +88,190 @@ inline QString buildSidecarPacket(const QStringList& tags, int rating,
 
     xml += QLatin1String("  </rdf:Description>\n </rdf:RDF>\n</x:xmpmeta>\n");
     return xml;
+}
+
+// Merge a generated packet with an existing one (the file's own
+// sidecar, or its embedded packet): every property the generated
+// packet does not set is carried over from the base verbatim, so
+// uploading never silently drops XMP the file already carried
+// (digiKam's own ColorLabel/PickLabel properties, say) just
+// because digiKam's database fields were generated on top. The
+// generated values win for the properties in generatedKeys.
+// Namespace declarations found on the base packet's ancestors
+// are re-declared on the generated description so preserved
+// elements keep their prefixes.
+inline QString mergeSidecarPackets(const QString& generated,
+                                   const QString& base,
+                                   const QStringList& generatedKeys)
+{
+    if (base.trimmed().isEmpty())
+    {
+        return generated;
+    }
+
+    auto escAttr = [](QString s)
+    {
+        s.replace(QLatin1Char('&'), QLatin1String("&amp;"));
+        s.replace(QLatin1Char('<'), QLatin1String("&lt;"));
+        s.replace(QLatin1Char('"'), QLatin1String("&quot;"));
+        return s;
+    };
+
+    auto escText = [](QString s)
+    {
+        s.replace(QLatin1Char('&'), QLatin1String("&amp;"));
+        s.replace(QLatin1Char('<'), QLatin1String("&lt;"));
+        s.replace(QLatin1Char('>'), QLatin1String("&gt;"));
+        return s;
+    };
+
+    QXmlStreamReader reader(base);
+    QString preserved;
+    QString extraDecls;
+    bool    complete = false;
+
+    // Serialize the element subtree the reader is positioned on
+    // (a StartElement token) back to XML text.
+    std::function<void()> copySubtree = [&]()
+    {
+        int depth = 0;
+
+        do
+        {
+            const QXmlStreamReader::TokenType token = reader.tokenType();
+
+            if (token == QXmlStreamReader::StartElement)
+            {
+                ++depth;
+                preserved += QLatin1Char('<') + reader.qualifiedName().toString();
+
+                for (const QXmlStreamNamespaceDeclaration& decl : reader.namespaceDeclarations())
+                {
+                    preserved += QStringLiteral(" xmlns:%1=\"%2\"")
+                                     .arg(decl.prefix().toString(), escAttr(decl.namespaceUri().toString()));
+                }
+
+                for (const QXmlStreamAttribute& attr : reader.attributes())
+                {
+                    preserved += QStringLiteral(" %1=\"%2\"")
+                                     .arg(attr.qualifiedName().toString(), escAttr(attr.value().toString()));
+                }
+
+                preserved += QLatin1Char('>');
+            }
+            else if (token == QXmlStreamReader::EndElement)
+            {
+                --depth;
+                preserved += QStringLiteral("</%1>").arg(reader.qualifiedName().toString());
+            }
+            else if (token == QXmlStreamReader::Characters)
+            {
+                preserved += escText(reader.text().toString());
+            }
+
+            if (depth == 0)
+            {
+                break;
+            }
+        }
+        while (reader.readNext() != QXmlStreamReader::Invalid);
+    };
+
+    while (reader.readNext() != QXmlStreamReader::Invalid)
+    {
+        if (reader.tokenType() == QXmlStreamReader::EndDocument)
+        {
+            complete = true;
+            break;
+        }
+
+        if (reader.tokenType() != QXmlStreamReader::StartElement)
+        {
+            continue;
+        }
+
+        for (const QXmlStreamNamespaceDeclaration& decl : reader.namespaceDeclarations())
+        {
+            const QString prefix = decl.prefix().toString();
+
+            if (prefix != QLatin1String("x") && prefix != QLatin1String("rdf")
+                && !extraDecls.contains(QStringLiteral("xmlns:%1=").arg(prefix)))
+            {
+                extraDecls += QStringLiteral(" xmlns:%1=\"%2\"")
+                                  .arg(prefix, escAttr(decl.namespaceUri().toString()));
+            }
+        }
+
+        if (reader.qualifiedName() != QLatin1String("rdf:Description"))
+        {
+            continue;
+        }
+
+        // Attributes on the description itself, minus the ones
+        // the generated packet sets.
+        for (const QXmlStreamAttribute& attr : reader.attributes())
+        {
+            const QString name = attr.qualifiedName().toString();
+
+            if (name != QLatin1String("rdf:about") && !generatedKeys.contains(name))
+            {
+                extraDecls += QStringLiteral(" %1=\"%2\"").arg(name, escAttr(attr.value().toString()));
+            }
+        }
+
+        // Child elements of this description.
+        int depth = 1;
+
+        while (depth > 0 && reader.readNext() != QXmlStreamReader::Invalid)
+        {
+            if (reader.tokenType() == QXmlStreamReader::StartElement)
+            {
+                if (depth == 1 && generatedKeys.contains(reader.qualifiedName().toString()))
+                {
+                    reader.skipCurrentElement();
+                }
+                else if (depth == 1)
+                {
+                    preserved += QStringLiteral("   ");
+                    copySubtree();
+                    preserved += QLatin1Char('\n');
+                }
+                else
+                {
+                    ++depth;
+                }
+            }
+            else if (reader.tokenType() == QXmlStreamReader::EndElement)
+            {
+                --depth;
+            }
+        }
+    }
+
+    if (!complete)
+    {
+        // A base packet we cannot parse to its end contributes
+        // nothing; the generated packet stands on its own.
+        // (hasError() cannot be the test: reading past the end
+        // of a valid document reports "premature end" too.)
+        return generated;
+    }
+
+    QString merged = generated;
+
+    if (!extraDecls.isEmpty())
+    {
+        merged.replace(QLatin1String("<rdf:Description rdf:about=\"\">"),
+                       QLatin1String("<rdf:Description rdf:about=\"\"") + extraDecls + QLatin1Char('>'));
+    }
+
+    if (!preserved.isEmpty())
+    {
+        merged.replace(QLatin1String("  </rdf:Description>"),
+                       preserved + QLatin1String("  </rdf:Description>"));
+    }
+
+    return merged;
 }
 
 } // namespace DigikamGenericImmichPlugin

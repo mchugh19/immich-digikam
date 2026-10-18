@@ -1790,15 +1790,55 @@ QString ImmichWindow::sidecarFor(const QUrl& url, const QString& filePath)
                              + info.fileName()
                              + QStringLiteral(".xmp");
 
+    // The base packet: whatever XMP the file already carries,
+    //    from its on-disk sidecar if it has one, else its embedded
+    //    packet. It is the preservation source below.
+    QString   basePacket;
+    QString   onDiskSidecar;
+    const QString candidates[] = {
+        filePath + QStringLiteral(".xmp"),
+        info.path() + QLatin1Char('/') + info.completeBaseName() + QStringLiteral(".xmp")
+    };
+
+    for (const QString& candidate : candidates)
+    {
+        if (QFileInfo::exists(candidate))
+        {
+            onDiskSidecar = candidate;
+            break;
+        }
+    }
+
+    if (!onDiskSidecar.isEmpty())
+    {
+        QFile base(onDiskSidecar);
+
+        if (base.open(QIODevice::ReadOnly))
+        {
+            basePacket = QString::fromUtf8(base.readAll());
+        }
+    }
+    else
+    {
+        DMetadata meta;
+
+        if (meta.load(filePath))
+        {
+            basePacket = QString::fromUtf8(meta.getXmp());
+        }
+    }
+
     // 1. digiKam's database is the user's current intent: this
     //    tool runs inside digiKam on digiKam's selection, and an
     //    export should carry the tags and rating as they stand in
     //    digiKam now. Generate the sidecar from the item info, in
     //    the packet shape the bridge contract verified against a
-    //    live server. (An on-disk sidecar used to win outright;
-    //    a stale fixture-era .xmp next to a test photo then
-    //    silently overrode fresh digiKam edits, exporting a
-    //    rating and tags the user had already changed.)
+    //    live server, merged over the base packet so any other
+    //    XMP the file carries (digiKam's label properties, say)
+    //    is preserved rather than dropped. (An on-disk sidecar
+    //    used to win outright; a stale fixture-era .xmp next to
+    //    a test photo then silently overrode fresh digiKam edits,
+    //    exporting a rating and tags the user had changed.)
     if (d->iface)
     {
         const DItemInfo item(d->iface->itemInfo(url));
@@ -1809,10 +1849,35 @@ QString ImmichWindow::sidecarFor(const QUrl& url, const QString& filePath)
 
         if (!tags.isEmpty() || rating > 0 || !comment.isEmpty() || hasGps)
         {
-            const QString xmp = buildSidecarPacket(tags, rating, comment,
-                                                   hasGps,
-                                                   hasGps ? item.latitude() : 0.0,
-                                                   hasGps ? item.longitude() : 0.0);
+            QStringList generatedKeys;
+
+            if (!tags.isEmpty())
+            {
+                generatedKeys << QStringLiteral("digiKam:TagsList");
+            }
+
+            if (rating > 0)
+            {
+                generatedKeys << QStringLiteral("xmp:Rating");
+            }
+
+            if (!comment.isEmpty())
+            {
+                generatedKeys << QStringLiteral("dc:description");
+            }
+
+            if (hasGps)
+            {
+                generatedKeys << QStringLiteral("exif:GPSLatitude")
+                              << QStringLiteral("exif:GPSLongitude");
+            }
+
+            const QString xmp = mergeSidecarPackets(
+                buildSidecarPacket(tags, rating, comment,
+                                   hasGps,
+                                   hasGps ? item.latitude() : 0.0,
+                                   hasGps ? item.longitude() : 0.0),
+                basePacket, generatedKeys);
 
             QFile file(tempPath);
 
@@ -1824,40 +1889,23 @@ QString ImmichWindow::sidecarFor(const QUrl& url, const QString& filePath)
         }
     }
 
-    // 2. An on-disk sidecar next to the file: the source when
-    //    digiKam's database holds no metadata for the item (a
-    //    sidecar written by another tool that digiKam has not
-    //    catalogued, say).
-    const QString candidates[] = {
-        filePath + QStringLiteral(".xmp"),
-        info.path() + QLatin1Char('/') + info.completeBaseName() + QStringLiteral(".xmp")
-    };
-
-    for (const QString& candidate : candidates)
+    // 2. digiKam's database held nothing for the item: the
+    //    file's own sidecar, if it has one, travels as it stands.
+    if (!onDiskSidecar.isEmpty())
     {
-        if (QFileInfo::exists(candidate))
-        {
-            return candidate;
-        }
+        return onDiskSidecar;
     }
 
-    // 3. Fall back to the file's embedded XMP packet, written out
-    //    as a sidecar so Immich gives it sidecar precedence.
-    DMetadata meta;
-
-    if (meta.load(filePath))
+    // 3. Otherwise the embedded packet, written out as a sidecar
+    //    so Immich gives it sidecar precedence.
+    if (!basePacket.isEmpty())
     {
-        const QByteArray xmp = meta.getXmp();
+        QFile file(tempPath);
 
-        if (!xmp.isEmpty())
+        if (file.open(QIODevice::WriteOnly) && file.write(basePacket.toUtf8()) == basePacket.toUtf8().size())
         {
-            QFile file(tempPath);
-
-            if (file.open(QIODevice::WriteOnly) && file.write(xmp) == xmp.size())
-            {
-                d->tempSidecar = tempPath;
-                return tempPath;
-            }
+            d->tempSidecar = tempPath;
+            return tempPath;
         }
     }
 

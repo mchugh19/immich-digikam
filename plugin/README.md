@@ -20,12 +20,16 @@ digiKam's own web-service plugins (Piwigo in particular).
   source previews its contents as thumbnails (sortable by date
   or name) before anything is downloaded. The filter box
   narrows the source tiles only, never the preview.
-- Upload: each selected item is sent with an XMP sidecar taken
-  from, in order, a sidecar generated from the item's metadata
-  in digiKam's database (tags, rating, caption, GPS: digiKam's
-  current state wins, so a stale sidecar left next to a file
-  cannot override fresh edits), an on-disk sidecar next to the
-  file, or the file's embedded XMP packet.
+- Upload: each selected item is sent with an XMP sidecar
+  generated from the item's metadata in digiKam's database
+  (tags, rating, caption, GPS: digiKam's current state wins,
+  so a stale sidecar left next to a file cannot override fresh
+  edits), merged over whatever XMP the file already carries
+  (its own sidecar, else its embedded packet) so properties
+  the generator does not set, digiKam's label properties
+  included, are preserved verbatim. When digiKam's database
+  holds nothing for an item, the file's own sidecar or
+  embedded packet travels as it stands.
 - Download: the selected album's or tag's originals and
   sidecars are written into a chosen folder; files already on
   disk are skipped, but their sidecars are refreshed (server
