@@ -391,6 +391,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
                 d->targetLabel->setText(item
                     ? QStringLiteral("Upload target: %1").arg(item->data(Qt::UserRole + 1).toString())
                     : QStringLiteral("Upload target: no album (library only)"));
+                refreshTileStyles();
 
                 if (item && d->mode == Mode::Import)
                 {
@@ -540,6 +541,7 @@ void ImmichWindow::addAlbumTile(const QString& id, const QString& name,
     if (!rangeText.isEmpty())
     {
         auto* const rangeLabel = new QLabel(rangeText);
+        rangeLabel->setObjectName(QStringLiteral("sub"));
         rangeLabel->setStyleSheet(QStringLiteral("color: #9a9a9a;"));
         tileLayout->addWidget(rangeLabel);
     }
@@ -547,6 +549,7 @@ void ImmichWindow::addAlbumTile(const QString& id, const QString& name,
     if (!countText.isEmpty())
     {
         auto* const countLabel = new QLabel(QStringLiteral("%1 items").arg(countText));
+        countLabel->setObjectName(QStringLiteral("sub"));
         countLabel->setStyleSheet(QStringLiteral("color: #9a9a9a;"));
         tileLayout->addWidget(countLabel);
     }
@@ -574,6 +577,33 @@ void ImmichWindow::selectSource(const QString& id)
     if (QListWidgetItem* const item = findAlbumItem(id))
     {
         d->albumGrid->setCurrentItem(item);
+    }
+}
+
+void ImmichWindow::refreshTileStyles()
+{
+    // The tiles' secondary labels (date range, item count) are a
+    // fixed mid-grey, which reads fine on the dark tile but washes
+    // out on the bright selection highlight. Restyle them for
+    // whichever tile is current.
+    for (int i = 0 ; i < d->albumGrid->count() ; ++i)
+    {
+        QListWidgetItem* const item = d->albumGrid->item(i);
+        QWidget* const tile = d->albumGrid->itemWidget(item);
+
+        if (!tile)
+        {
+            continue;
+        }
+
+        const bool selected = (item == d->albumGrid->currentItem());
+        const QList<QLabel*> subs = tile->findChildren<QLabel*>(QStringLiteral("sub"));
+
+        for (QLabel* const sub : subs)
+        {
+            sub->setStyleSheet(selected ? QStringLiteral("color: rgba(255, 255, 255, 0.8);")
+                                        : QStringLiteral("color: #9a9a9a;"));
+        }
     }
 }
 
@@ -733,15 +763,12 @@ void ImmichWindow::applyFilter()
                         && !item->text().contains(text, Qt::CaseInsensitive));
     }
 
-    if (d->mode == Mode::Import)
-    {
-        for (int i = 0 ; i < d->previewList->count() ; ++i)
-        {
-            QListWidgetItem* const item = d->previewList->item(i);
-            item->setHidden(!text.isEmpty()
-                            && !item->text().contains(text, Qt::CaseInsensitive));
-        }
-    }
+    // The contents preview is deliberately NOT filtered: the
+    // filter is for finding a source, and hiding the selected
+    // album's photos because their file names do not match the
+    // album search text reads as "the preview did not load"
+    // (an album of PXL_*.jpg under a "test" filter showed
+    // "8 items" over an empty grid).
 }
 
 void ImmichWindow::slotFilterChanged(const QString&)

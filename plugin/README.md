@@ -18,8 +18,8 @@ digiKam's own web-service plugins (Piwigo in particular).
 - Import source switch (albums or tags): the import tool can
   pull an album or every asset carrying a tag. Selecting a
   source previews its contents as thumbnails (sortable by date
-  or name, filterable with the same filter box) before anything
-  is downloaded.
+  or name) before anything is downloaded. The filter box
+  narrows the source tiles only, never the preview.
 - Upload: each selected item is sent with an XMP sidecar taken
   from, in order, an on-disk sidecar next to the file, a sidecar
   generated from the item's metadata in digiKam's database (tags,

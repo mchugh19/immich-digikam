@@ -116,6 +116,7 @@ private:
                       const QString& countText, const QString& rangeText,
                       const QString& thumbnailAssetId);
     void setAlbumCover(QListWidgetItem* item, const QPixmap& pix);
+    void refreshTileStyles();
     void selectSource(const QString& id);
     void queueThumb(bool cover, const QString& key, const QString& assetId);
     void pumpThumbs();
