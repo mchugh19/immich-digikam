@@ -273,6 +273,10 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->albumGrid->setGridSize(QSize(208, 248));
     d->albumGrid->setUniformItemSizes(true);
     d->albumGrid->setSelectionMode(QAbstractItemView::SingleSelection);
+    // At least one whole tile row is always visible: the layout
+    // stretch alone could squeeze the grid below a row's height,
+    // leaving a clipped row and a scrollbar for a single row.
+    d->albumGrid->setMinimumHeight(248 + 16);
     d->filterEdit       = new QLineEdit;
     d->filterEdit->setPlaceholderText(QStringLiteral("Filter..."));
     d->filterEdit->setClearButtonEnabled(true);
@@ -291,6 +295,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->tagGrid->setSpacing(4);
     d->tagGrid->setWordWrap(true);
     d->tagGrid->setUniformItemSizes(true);
+    d->tagGrid->setMinimumHeight(104 + 16);
     d->tagGrid->setVisible(false);
     d->previewList      = new QListWidget;
     d->previewList->setViewMode(QListWidget::IconMode);
@@ -300,6 +305,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     // from the (still empty) icons, leaving the late-arriving
     // thumbnails squashed until a rebuild relayouts them.
     d->previewList->setGridSize(QSize(116, 128));
+    d->previewList->setMinimumHeight(128 + 16);
     d->previewList->setResizeMode(QListWidget::Adjust);
     d->previewList->setMovement(QListWidget::Static);
     d->previewList->setSpacing(4);
