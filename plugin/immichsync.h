@@ -296,6 +296,7 @@ struct IdentityCandidate
     QString name;
     QString localDateTime;   // server wall-clock capture time
     QString createdAt;       // server ingest time (newest wins)
+    QString stackId;         // the stack the asset belongs to, if any
     int     width  = 0;
     int     height = 0;
 };
@@ -303,6 +304,7 @@ struct IdentityCandidate
 struct IdentityMatch
 {
     QString assetId;
+    QString stackId;           // stackId of the chosen candidate
     int     candidates  = 0;   // name+dimension matches found
     bool    strictTime  = false;
     // The match rests on name + exact capture time alone
@@ -395,6 +397,7 @@ inline IdentityMatch chooseIdentityMatch(const QList<IdentityCandidate>& candida
     }
 
     result.assetId = best->id;
+    result.stackId = best->stackId;
     return result;
 }
 

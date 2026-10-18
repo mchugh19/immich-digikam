@@ -146,9 +146,23 @@ public:
 
     /** Search assets by original file name, for the export
      * identity match. Emits signalIdentitySearch with the raw
-     * result items (id, name, capture time, dimensions).
+     * result items (id, name, capture time, dimensions). When
+     * albumId is given the search is scoped to that album:
+     * the file name is the primary key within the album the
+     * user is exporting to.
      */
-    void searchByFileName(const QString& name);
+    void searchByFileName(const QString& name, const QString& albumId = QString());
+
+    /** Create a stack (POST /stacks); the first asset id
+     * becomes the primary. Emits signalStackCreated with the
+     * first asset id, the new stack id and the HTTP status.
+     */
+    void createStack(const QStringList& assetIds);
+
+    /** Fetch one stack's member ids (GET /stacks/<id>).
+     * Emits signalStackFetched with the HTTP status.
+     */
+    void fetchStack(const QString& stackId);
 
     /** List the albums containing one asset (GET
      * /albums?assetId=). Emits signalAlbumsForAsset.
@@ -196,6 +210,8 @@ Q_SIGNALS:
     void signalTagCreated(const QString& name, const QString& id, int httpStatus);
     void signalBulkTagged(const QString& tagId, int httpStatus);
     void signalIdentitySearch(const QString& name, const QJsonArray& items);
+    void signalStackCreated(const QString& firstAssetId, const QString& stackId, int httpStatus);
+    void signalStackFetched(const QString& stackId, const QStringList& memberIds, int httpStatus);
     void signalAlbumsForAsset(const QString& assetId, const QStringList& albumIds);
     void signalAssetsDeleted(int httpStatus);
 

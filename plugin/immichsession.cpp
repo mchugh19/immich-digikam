@@ -29,6 +29,7 @@ public:
     QString url;
     QString apiKey;
     QString downloadDir;
+    QString replaceMode = QStringLiteral("stack");
 };
 
 ImmichSession::ImmichSession()
@@ -56,6 +57,11 @@ QString ImmichSession::downloadDir() const
     return d->downloadDir;
 }
 
+QString ImmichSession::replaceMode() const
+{
+    return d->replaceMode;
+}
+
 void ImmichSession::setUrl(const QString& url)
 {
     d->url = url;
@@ -71,12 +77,18 @@ void ImmichSession::setDownloadDir(const QString& dir)
     d->downloadDir = dir;
 }
 
+void ImmichSession::setReplaceMode(const QString& mode)
+{
+    d->replaceMode = (mode == QStringLiteral("trash")) ? mode : QStringLiteral("stack");
+}
+
 void ImmichSession::save()
 {
     KConfigGroup group = KSharedConfig::openConfig()->group(QStringLiteral("Immich Settings"));
     group.writeEntry("ServerUrl", d->url);
     group.writeEntry("ApiKey", d->apiKey);
     group.writeEntry("DownloadDir", d->downloadDir);
+    group.writeEntry("ReplaceMode", d->replaceMode);
     group.sync();
 }
 
@@ -86,6 +98,7 @@ void ImmichSession::load()
     d->url         = group.readEntry("ServerUrl", QString());
     d->apiKey      = group.readEntry("ApiKey", QString());
     d->downloadDir = group.readEntry("DownloadDir", QString());
+    setReplaceMode(group.readEntry("ReplaceMode", QStringLiteral("stack")));
 }
 
 } // namespace DigikamGenericImmichPlugin

@@ -105,6 +105,9 @@ private Q_SLOTS:
     void startRestoreOrSync();
     void restoreNext();
     void restoreAdvanceAdd();
+    void restoreStackStep();
+    void slotStackFetched(const QString& stackId, const QStringList& memberIds, int httpStatus);
+    void slotStackCreated(const QString& firstAssetId, const QString& stackId, int httpStatus);
     void slotRestoreAlbums(const QString& assetId, const QStringList& albumIds);
     void slotAssetsDeleted(int httpStatus);
     void slotAlbumUpdated(bool changed);

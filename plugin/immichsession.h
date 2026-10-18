@@ -43,9 +43,17 @@ public:
     /** Last folder an album was downloaded to (dialog start). */
     QString downloadDir() const;
 
+    /** What an export does with the previous copy of a photo
+     * that was edited in digiKam: "stack" (the new version
+     * becomes the primary of a stack over the old one) or
+     * "trash" (overwrite: the old copy goes to Immich's trash).
+     */
+    QString replaceMode() const;
+
     void setUrl(const QString& url);
     void setApiKey(const QString& apiKey);
     void setDownloadDir(const QString& dir);
+    void setReplaceMode(const QString& mode);
 
     void save();
     void load();

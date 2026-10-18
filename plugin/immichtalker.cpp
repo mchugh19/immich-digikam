@@ -46,7 +46,8 @@ public:
                     DownloadRecord, MetaSidecar, MetaRecord,
                     BulkCheck, Thumbnail,
                     SyncRecord, PatchAsset, CreateTag, BulkTagAssets,
-                    SearchByName, AlbumsForAsset, DeleteAssets };
+                    SearchByName, AlbumsForAsset, DeleteAssets,
+                    CreateStack, FetchStack };
     QHash<QNetworkReply*, Op> ops;
     // Sync context per reply: the asset id (or tag name / id).
     QHash<QNetworkReply*, QString> syncCtx;
@@ -345,12 +346,17 @@ void ImmichTalker::createTag(const QString& name)
     Q_EMIT signalBusy(true);
 }
 
-void ImmichTalker::searchByFileName(const QString& name)
+void ImmichTalker::searchByFileName(const QString& name, const QString& albumId)
 {
-    const QJsonObject obj {
+    QJsonObject obj {
         { QStringLiteral("originalFileName"), name },
         { QStringLiteral("size"),             250  }
     };
+
+    if (!albumId.isEmpty())
+    {
+        obj.insert(QStringLiteral("albumIds"), QJsonArray { albumId });
+    }
     QNetworkRequest req = makeRequest(QStringLiteral("/search/metadata"));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
@@ -365,6 +371,33 @@ void ImmichTalker::listAlbumsForAsset(const QString& assetId)
         makeRequest(QStringLiteral("/albums?assetId=%1").arg(assetId)));
     d->ops.insert(reply, Private::Op::AlbumsForAsset);
     d->syncCtx.insert(reply, assetId);
+    Q_EMIT signalBusy(true);
+}
+
+void ImmichTalker::createStack(const QStringList& assetIds)
+{
+    QJsonArray ids;
+
+    for (const QString& id : assetIds)
+    {
+        ids.append(id);
+    }
+
+    const QJsonObject obj { { QStringLiteral("assetIds"), ids } };
+    QNetworkRequest req = makeRequest(QStringLiteral("/stacks"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
+    d->ops.insert(reply, Private::Op::CreateStack);
+    d->syncCtx.insert(reply, assetIds.value(0));
+    Q_EMIT signalBusy(true);
+}
+
+void ImmichTalker::fetchStack(const QString& stackId)
+{
+    QNetworkReply* const reply = d->net->get(
+        makeRequest(QStringLiteral("/stacks/%1").arg(stackId)));
+    d->ops.insert(reply, Private::Op::FetchStack);
+    d->syncCtx.insert(reply, stackId);
     Q_EMIT signalBusy(true);
 }
 
@@ -573,6 +606,34 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
                                                                             : QByteArray();
         reply->deleteLater();
         Q_EMIT signalThumbnail(assetId, bytes);
+        return;
+    }
+
+    if (op == Private::Op::CreateStack)
+    {
+        const QString     ctx        = d->syncCtx.take(reply);
+        const int         httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QJsonObject obj        = QJsonDocument::fromJson(reply->readAll()).object();
+        reply->deleteLater();
+        Q_EMIT signalStackCreated(ctx, obj.value(QStringLiteral("id")).toString(), httpStatus);
+        return;
+    }
+
+    if (op == Private::Op::FetchStack)
+    {
+        const QString     ctx        = d->syncCtx.take(reply);
+        const int         httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QJsonObject obj        = QJsonDocument::fromJson(reply->readAll()).object();
+        const QJsonArray  assets     = obj.value(QStringLiteral("assets")).toArray();
+        QStringList       memberIds;
+
+        for (const QJsonValue& v : assets)
+        {
+            memberIds.append(v.toObject().value(QStringLiteral("id")).toString());
+        }
+
+        reply->deleteLater();
+        Q_EMIT signalStackFetched(ctx, memberIds, httpStatus);
         return;
     }
 

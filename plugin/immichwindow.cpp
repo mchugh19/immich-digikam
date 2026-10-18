@@ -173,22 +173,33 @@ public:
     QList<QUrl>  identityQueue;
     QUrl         identityUrl;
     QString      identityCandidateId;
+    QString      identityStackId;
     bool         identityStrict = false;
     bool         identityDimsDiffer = false;
     bool         identityWaitingThumb = false;
+    int          identityPass = 1;      // 1 = target-album scope, 2 = library
+    bool         identityNameSeen = false;
     int          matchedSync   = 0;
     int          matchedMulti  = 0;
-    int          replacedCount = 0;
+    int          stackedCount  = 0;
+    int          trashFallbackCount = 0;
     QHash<QString, QString> replaceOldByPath;
+    QHash<QString, QString> replaceStackByPath;
     struct ReplaceCtx
     {
         QString oldId;
         QString newId;
         QString localPath;
+        QString stackId;   // the old copy's stack, if it has one
     };
     QList<ReplaceCtx> replaces;
     QList<ReplaceCtx> restoreQueue;
     QStringList  restoreAlbums;
+    QStringList  restoreTrashQueue;   // stacking refused: fall back to trash
+    QStringList  overwriteQueue;      // user chose overwrite: trash by choice
+    int          overwriteCount = 0;
+    bool         replaceByStack = true;
+    QComboBox*   replaceCombo = nullptr;
     bool         restoring = false;
     QString      currentUploadPath;
 
@@ -346,6 +357,18 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->keyEdit->setEchoMode(QLineEdit::Password);
     form->addRow(QStringLiteral("Server URL:"), d->urlEdit);
     form->addRow(QStringLiteral("API key:"), d->keyEdit);
+    // What happens to the previous copy when a photo edited in
+    // digiKam is exported again: stack the new version over it
+    // (nothing is deleted) or overwrite it (old copy to trash).
+    // Metadata-only changes never reach this choice: they sync.
+    d->replaceCombo = new QComboBox;
+    d->replaceCombo->addItem(QStringLiteral("Stack the new version over the old"),
+                             QStringLiteral("stack"));
+    d->replaceCombo->addItem(QStringLiteral("Overwrite (old copy to Immich's trash)"),
+                             QStringLiteral("trash"));
+    d->replaceCombo->setCurrentIndex(
+        d->session->replaceMode() == QStringLiteral("trash") ? 1 : 0);
+    form->addRow(QStringLiteral("Edited photos:"), d->replaceCombo);
 
     auto* const saveBtn = new QPushButton(QStringLiteral("Save settings"));
     d->refreshBtn       = new QPushButton(QStringLiteral("Refresh albums"));
@@ -422,6 +445,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     // switch and the contents preview belong to the import tool;
     // the filter serves the source list in both.
     d->targetLabel->setVisible(d->mode == Mode::Export);
+    d->replaceCombo->setVisible(d->mode == Mode::Export);
     d->uploadBtn->setVisible(d->mode == Mode::Export);
     d->newAlbumBtn->setVisible(d->mode == Mode::Export);
     d->downloadBtn->setVisible(d->mode == Mode::Import);
@@ -537,6 +561,10 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     connect(d->tagsSrc, &QRadioButton::toggled, this, &ImmichWindow::slotSourceChanged);
     connect(d->filterEdit, &QLineEdit::textChanged, this, &ImmichWindow::slotFilterChanged);
     connect(d->previewSort, &QComboBox::currentIndexChanged, this, &ImmichWindow::slotPreviewSortChanged);
+    connect(d->replaceCombo, &QComboBox::currentIndexChanged, this, [this](int index) {
+        d->session->setReplaceMode(d->replaceCombo->itemData(index).toString());
+        d->session->save();
+    });
     connect(d->downloadBtn, &QPushButton::clicked, this, &ImmichWindow::slotDownloadAlbum);
     connect(d->cancelBtn, &QPushButton::clicked, this, &ImmichWindow::slotCancelTransfer);
     connect(d->talker, &ImmichTalker::signalAlbums, this, &ImmichWindow::slotAlbums);
@@ -555,6 +583,8 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     connect(d->talker, &ImmichTalker::signalIdentitySearch, this, &ImmichWindow::slotIdentitySearch);
     connect(d->talker, &ImmichTalker::signalAlbumsForAsset, this, &ImmichWindow::slotRestoreAlbums);
     connect(d->talker, &ImmichTalker::signalAssetsDeleted, this, &ImmichWindow::slotAssetsDeleted);
+    connect(d->talker, &ImmichTalker::signalStackCreated, this, &ImmichWindow::slotStackCreated);
+    connect(d->talker, &ImmichTalker::signalStackFetched, this, &ImmichWindow::slotStackFetched);
     connect(d->talker, &ImmichTalker::signalError, this, &ImmichWindow::slotError);
     connect(d->talker, &ImmichTalker::signalBusy, this, &ImmichWindow::slotBusy);
 }
@@ -1138,16 +1168,25 @@ void ImmichWindow::slotUploadSelection()
 
     d->identityQueue.clear();
     d->identityCandidateId.clear();
+    d->identityStackId.clear();
     d->identityStrict = false;
     d->identityDimsDiffer = false;
     d->identityWaitingThumb = false;
+    d->identityPass = 1;
+    d->identityNameSeen = false;
     d->matchedSync   = 0;
     d->matchedMulti  = 0;
-    d->replacedCount = 0;
+    d->stackedCount  = 0;
+    d->trashFallbackCount = 0;
+    d->overwriteCount = 0;
+    d->overwriteQueue.clear();
+    d->replaceByStack = (d->session->replaceMode() != QStringLiteral("trash"));
     d->replaceOldByPath.clear();
+    d->replaceStackByPath.clear();
     d->replaces.clear();
     d->restoreQueue.clear();
     d->restoreAlbums.clear();
+    d->restoreTrashQueue.clear();
     d->restoring = false;
 
     setTransferButtonsEnabled(false);
@@ -1246,7 +1285,13 @@ void ImmichWindow::nextIdentity()
     const QString path = d->identityUrl.toLocalFile();
     d->status->setText(QStringLiteral("Checking for an existing copy of %1...")
                            .arg(QFileInfo(path).fileName()));
-    d->talker->searchByFileName(QFileInfo(path).fileName());
+
+    // Pass 1 scopes the search to the album being exported to:
+    // within an album, the file name is the primary key. Only a
+    // complete miss there earns a library-wide second pass.
+    d->identityPass     = 1;
+    d->identityNameSeen = false;
+    d->talker->searchByFileName(QFileInfo(path).fileName(), d->targetAlbumId);
 }
 
 void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray& items)
@@ -1268,9 +1313,16 @@ void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray&
         c.name          = o.value(QStringLiteral("originalFileName")).toString();
         c.localDateTime = o.value(QStringLiteral("localDateTime")).toString();
         c.createdAt     = o.value(QStringLiteral("createdAt")).toString();
+        c.stackId       = o.value(QStringLiteral("stack")).toObject()
+                           .value(QStringLiteral("id")).toString();
         c.width         = o.value(QStringLiteral("width")).toInt();
         c.height        = o.value(QStringLiteral("height")).toInt();
         candidates.append(c);
+
+        if (c.name == QFileInfo(path).fileName())
+        {
+            d->identityNameSeen = true;
+        }
     }
 
     QString dateStr;
@@ -1290,6 +1342,17 @@ void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray&
 
     if (match.assetId.isEmpty())
     {
+        if (d->identityPass == 1 && !d->targetAlbumId.isEmpty() && !d->identityNameSeen)
+        {
+            // The target album holds nothing with this name at
+            // all: the photo may live in another album (moved
+            // in Immich, say), so try once library-wide before
+            // treating the file as new.
+            d->identityPass = 2;
+            d->talker->searchByFileName(QFileInfo(path).fileName());
+            return;
+        }
+
         d->pending.append(url);
         nextIdentity();
         return;
@@ -1301,6 +1364,7 @@ void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray&
     }
 
     d->identityCandidateId  = match.assetId;
+    d->identityStackId      = match.stackId;
     d->identityStrict       = match.strictTime;
     d->identityDimsDiffer   = match.dimsDiffer;
     d->identityWaitingThumb = true;
@@ -1343,6 +1407,7 @@ void ImmichWindow::slotIdentityThumb(const QString& /*assetId*/, const QByteArra
             && imageContains(remoteImage, localImage))
         {
             d->replaceOldByPath.insert(path, d->identityCandidateId);
+            d->replaceStackByPath.insert(path, d->identityStackId);
         }
 
         d->pending.append(url);
@@ -1378,6 +1443,7 @@ void ImmichWindow::slotIdentityThumb(const QString& /*assetId*/, const QByteArra
         // A real edit of a photo the server holds: upload it and
         // replace the old copy once the upload lands.
         d->replaceOldByPath.insert(path, d->identityCandidateId);
+        d->replaceStackByPath.insert(path, d->identityStackId);
     }
 
     d->pending.append(url);
@@ -1474,6 +1540,7 @@ void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*
         ctx.oldId     = replacedOld;
         ctx.newId     = assetId;
         ctx.localPath = d->currentUploadPath;
+        ctx.stackId   = d->replaceStackByPath.take(d->currentUploadPath);
         d->replaces.append(ctx);
 
         Private::SyncJob job;
@@ -1550,8 +1617,10 @@ void ImmichWindow::startRestoreOrSync()
     }
 
     // Replaced photos: put each new copy into every album its
-    // predecessor belonged to, then trash the predecessors. Only
-    // when all of that has landed does the metadata sync start.
+    // predecessor belonged to, then stack it as the new primary
+    // over the predecessor (the old version stays in the
+    // library, in the stack). Only when all of that has landed
+    // does the metadata sync start.
     d->restoring    = true;
     d->restoreQueue = d->replaces;
     d->status->setText(QStringLiteral("Replacing %1 edited photo(s) in Immich...")
@@ -1563,20 +1632,19 @@ void ImmichWindow::restoreNext()
 {
     if (d->restoreQueue.isEmpty())
     {
-        QStringList oldIds;
+        // Old copies headed for the trash, whether the user
+        // chose overwrite or stacking was refused: a replace
+        // never leaves two loose copies behind.
+        const QStringList toTrash = d->restoreTrashQueue + d->overwriteQueue;
 
-        for (const Private::ReplaceCtx& ctx : d->replaces)
+        if (!toTrash.isEmpty())
         {
-            oldIds.append(ctx.oldId);
-        }
-
-        if (!oldIds.isEmpty())
-        {
-            d->talker->deleteAssets(oldIds);
+            d->talker->deleteAssets(toTrash);
             return;
         }
 
         d->restoring = false;
+        d->replaces.clear();
         maybeStartSync();
         return;
     }
@@ -1606,13 +1674,103 @@ void ImmichWindow::restoreAdvanceAdd()
 
     if (d->restoreAlbums.isEmpty())
     {
-        d->restoreQueue.removeFirst();
-        restoreNext();
+        restoreStackStep();
         return;
     }
 
     const QString albumId = d->restoreAlbums.takeFirst();
     d->talker->addToAlbum(albumId, { d->restoreQueue.constFirst().newId });
+}
+
+void ImmichWindow::restoreStackStep()
+{
+    if (d->restoreQueue.isEmpty())
+    {
+        restoreNext();
+        return;
+    }
+
+    if (!d->replaceByStack)
+    {
+        // The user chose overwrite: the old copy goes to the
+        // trash instead of into a stack.
+        const Private::ReplaceCtx ctx = d->restoreQueue.takeFirst();
+        d->overwriteQueue.append(ctx.oldId);
+        restoreNext();
+        return;
+    }
+
+    const Private::ReplaceCtx& ctx = d->restoreQueue.constFirst();
+
+    if (ctx.stackId.isEmpty())
+    {
+        // First edit of this photo: a fresh two-member stack,
+        // the edit as primary.
+        d->talker->createStack({ ctx.newId, ctx.oldId });
+    }
+    else
+    {
+        // Already versioned: fetch the stack so the restack can
+        // carry every earlier version along.
+        d->talker->fetchStack(ctx.stackId);
+    }
+}
+
+void ImmichWindow::slotStackFetched(const QString& stackId, const QStringList& memberIds,
+                                    int httpStatus)
+{
+    if (!d->restoring || d->restoreQueue.isEmpty()
+        || d->restoreQueue.constFirst().stackId != stackId)
+    {
+        return;
+    }
+
+    const Private::ReplaceCtx& ctx = d->restoreQueue.constFirst();
+    QStringList members { ctx.newId };
+
+    if (httpStatus >= 200 && httpStatus < 300)
+    {
+        for (const QString& id : memberIds)
+        {
+            if (id != ctx.newId)
+            {
+                members.append(id);
+            }
+        }
+    }
+
+    if (members.size() < 2)
+    {
+        members.append(ctx.oldId);
+    }
+
+    // Creating a stack with already-stacked assets moves them
+    // into the new one, so the whole version history ends up
+    // under the newest edit as primary.
+    d->talker->createStack(members);
+}
+
+void ImmichWindow::slotStackCreated(const QString& firstAssetId, const QString& stackId,
+                                    int httpStatus)
+{
+    if (!d->restoring || d->restoreQueue.isEmpty()
+        || d->restoreQueue.constFirst().newId != firstAssetId)
+    {
+        return;
+    }
+
+    const Private::ReplaceCtx ctx = d->restoreQueue.takeFirst();
+
+    if (httpStatus >= 200 && httpStatus < 300 && !stackId.isEmpty())
+    {
+        ++d->stackedCount;
+    }
+    else
+    {
+        d->restoreTrashQueue.append(ctx.oldId);
+    }
+
+    restoreNext();
 }
 
 void ImmichWindow::slotAssetsDeleted(int httpStatus)
@@ -1621,16 +1779,19 @@ void ImmichWindow::slotAssetsDeleted(int httpStatus)
 
     if (httpStatus >= 200 && httpStatus < 300)
     {
-        d->replacedCount = d->replaces.size();
+        d->trashFallbackCount = d->restoreTrashQueue.size();
+        d->overwriteCount     = d->overwriteQueue.size();
 
-        for (const Private::ReplaceCtx& ctx : d->replaces)
+        for (const QString& oldId : d->restoreTrashQueue + d->overwriteQueue)
         {
-            d->syncState.remove(ctx.oldId);
+            d->syncState.remove(oldId);
         }
 
         saveSyncState(d->syncStatePath, d->syncState);
     }
 
+    d->restoreTrashQueue.clear();
+    d->overwriteQueue.clear();
     d->replaces.clear();
     d->restoreQueue.clear();
     maybeStartSync();
@@ -1660,11 +1821,25 @@ void ImmichWindow::printUploadSummary()
         }
     }
 
-    if (d->replacedCount > 0)
+    if (d->stackedCount > 0)
+    {
+        text += QStringLiteral(" %1 edited photo(s) replaced their Immich copy,"
+                               " stacked as the new primary over the previous version.")
+                    .arg(d->stackedCount);
+    }
+
+    if (d->overwriteCount > 0)
     {
         text += QStringLiteral(" %1 edited photo(s) replaced their Immich copy"
                                " (the old copies are in Immich's trash).")
-                    .arg(d->replacedCount);
+                    .arg(d->overwriteCount);
+    }
+
+    if (d->trashFallbackCount > 0)
+    {
+        text += QStringLiteral(" %1 replaced photo(s) could not be stacked;"
+                               " their old copies are in Immich's trash.")
+                    .arg(d->trashFallbackCount);
     }
 
     if (d->syncRan)

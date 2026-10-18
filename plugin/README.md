@@ -41,20 +41,25 @@ digiKam's own web-service plugins (Piwigo in particular).
   (digiKam writes metadata into files, or the photo was
   edited) would normally upload as a second copy. Before
   uploading such a file, the plugin looks for the same photo
-  on the server by file name, capture time and dimensions,
-  and compares the pixels with the server's thumbnail. A
-  metadata-only change uploads nothing: the metadata sync
-  below updates the existing asset. A real edit (changed
-  pixels, same capture time) uploads the new version, puts
-  it in every album the old copy belonged to, syncs its
-  metadata, and moves the old copy to Immich's trash
-  (recoverable for 30 days). A crop changes the dimensions,
-  so it matches on file name and exact capture time alone,
-  and only replaces after a containment check confirms the
-  local image really is a crop of the server's photo. When
-  the evidence is ambiguous (no matching capture time,
-  several candidates), nothing is overwritten: the file
-  uploads as new, or syncs to the newest matching copy.
+  on the server: within the album being exported to, the
+  file name is the primary key, verified against capture
+  time and dimensions, with a library-wide search as a
+  second pass, and the pixels are compared with the server's
+  thumbnail. A metadata-only change uploads nothing: the
+  metadata sync below updates the existing asset. A real
+  edit (changed pixels, same capture time) uploads the new
+  version, puts it in every album the old copy belonged to,
+  syncs its metadata, and stacks it as the new primary over
+  the old copy, which stays in the library inside the stack
+  (repeated edits accumulate as a version stack, newest on
+  top). A crop changes the dimensions, so it matches on file
+  name and exact capture time alone, and only replaces
+  after a containment check confirms the local image really
+  is a crop of the server's photo. When the evidence is
+  ambiguous (no matching capture time, several candidates),
+  nothing is overwritten: the file uploads as new, or syncs
+  to the newest matching copy. See "Re-exporting: what to
+  expect" below for the full set of cases.
 - Metadata sync on export: a selected file the server
   already has (checksum match) is not re-uploaded, but its
   digiKam tags, rating, caption and GPS are diffed against
@@ -78,6 +83,77 @@ digiKam's own web-service plugins (Piwigo in particular).
   the invalidation, and an upload drops its target album's
   cached listing only when the album actually gained assets.
 
+## Re-exporting: what to expect
+
+Exporting the same selection twice is safe, and editing a
+photo in digiKam between exports does not create duplicates
+in Immich. What happens to each file depends on what changed:
+
+- **Nothing changed.** The file's checksum matches the
+  server's copy. Nothing is uploaded; the metadata sync runs
+  and normally finds nothing to write.
+- **Only metadata changed** (tags, rating, caption, GPS),
+  whether digiKam kept it in its database or wrote it into
+  the file. The photo is recognised by file name (within the
+  album being exported to), capture time and dimensions, and
+  its pixels compare identical to the server's copy. Nothing
+  is uploaded; the changed metadata is written to the
+  existing Immich asset through the API.
+- **The picture itself was edited** (colour, retouching, any
+  change that alters pixels), with the same capture time.
+  The new version is uploaded and added to every album the
+  old copy belonged to. What happens to the old copy is the
+  "Edited photos:" choice in the export window: **Stack**
+  (the default) makes the new version the primary of a stack
+  over the old copy, which is not deleted: it stays in the
+  stack, visible in Immich's stack view, and repeated edits
+  keep adding versions, newest on top. **Overwrite** sends
+  the old copy to Immich's trash instead (recoverable for 30
+  days). Metadata-only changes never reach this choice: they
+  always sync onto the existing asset, as above. Either way,
+  the replaced asset is a new asset, so the old copy's
+  shared links do not carry over, its face assignments
+  re-derive from recognition, and any edits made with
+  Immich's own editor on the old copy do not transfer.
+- **The photo was cropped or resized.** Dimensions no longer
+  match, so recognition rests on the file name and the exact
+  capture time, and the new version replaces only after a
+  containment check confirms the local image is really a
+  crop of the server's photo. It is then stacked like any
+  other edit.
+- **The evidence is ambiguous.** A different photo that
+  merely shares a file name, a missing or unmatched capture
+  time, or a failed containment check means nothing is
+  overwritten and nothing is stacked: the file uploads as a
+  new photo. When a photo already has several copies on the
+  server, the newest is the match and the summary says so.
+
+The run summary at the end of an export reports each of
+these outcomes with its own count: uploaded, already on the
+server, matched (metadata synced instead of re-uploading),
+replaced and stacked, and conflicts settled by timestamp.
+
+Expectations to know before relying on this:
+
+- Recognition needs the file name and the EXIF capture time
+  to survive the edit. Both do in digiKam's normal editing
+  flow; a file that was renamed, or whose capture time was
+  rewritten, is treated as a new photo.
+- RAW files and other formats the plugin cannot decode get
+  the benefit of the doubt: their pixels count as unchanged,
+  so their metadata syncs and they are never replaced or
+  stacked by an export. A developed version of a RAW photo is
+  a different file and uploads as its own photo.
+- Tag sync is add-only in both the metadata sync and the
+  sidecars: removing a tag in digiKam does not remove it in
+  Immich.
+- Stacking needs the `stack.create` and `stack.read` API key
+  permissions. If the server refuses to stack, the replace
+  falls back to moving the old copy to Immich's trash
+  (recoverable for 30 days, needs `asset.delete`) rather
+  than leaving two loose copies. The Overwrite choice needs
+  `asset.delete` directly.
+
 ## Server and API key
 
 Tested against Immich 3.3.3. The API key needs these permissions:
@@ -86,9 +162,11 @@ Tested against Immich 3.3.3. The API key needs these permissions:
 The export metadata sync additionally needs `asset.update`,
 `tag.create` and `tag.asset`; without them the sync is refused
 by the server and the run's summary says so (uploads and
-downloads are unaffected). Replacing an edited photo's old
-copy additionally needs `asset.delete` (the old copy goes to
-Immich's trash, it is not permanently deleted).
+downloads are unaffected). Stacking a replaced photo over its
+previous version additionally needs `stack.create` and
+`stack.read`; if stacking is refused, the replace falls back
+to moving the old copy to Immich's trash, which needs
+`asset.delete`.
 
 ## Build
 

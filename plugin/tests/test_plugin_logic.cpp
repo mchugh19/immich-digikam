@@ -303,13 +303,15 @@ private Q_SLOTS:
 
     void identityMatchesAndSwappedDimensions()
     {
-        const QList<IdentityCandidate> cands {
+        QList<IdentityCandidate> cands {
             cand(QStringLiteral("a"), QStringLiteral("photo.jpg"),
                  QStringLiteral("2026-10-18T19:15:00.000Z"), QStringLiteral("2026-10-18"), 600, 800),
         };
+        cands[0].stackId = QStringLiteral("stack-1");
         const IdentityMatch m = chooseIdentityMatch(
             cands, QStringLiteral("photo.jpg"), QStringLiteral("2026-10-18T19:15:00"), 800, 600);
         QCOMPARE(m.assetId, QStringLiteral("a"));
+        QCOMPARE(m.stackId, QStringLiteral("stack-1"));
         QVERIFY(m.strictTime);
         QCOMPARE(m.candidates, 1);
     }
