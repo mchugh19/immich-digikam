@@ -32,6 +32,12 @@ digiKam's own web-service plugins (Piwigo in particular).
   Immich still reach digiKam on a re-download.
 - Both transfers run item by item with a progress bar and a
   summary (done / skipped / failed counts).
+- Caching: thumbnails (album covers and contents previews)
+  are kept on disk in digiKam's cache directory and reused
+  across sessions, pruned oldest-first past roughly 200 MB.
+  Contents listings are cached for the session; Refresh is
+  the invalidation, and an upload drops its target album's
+  cached listing.
 
 ## Server and API key
 

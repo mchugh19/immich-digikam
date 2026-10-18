@@ -44,6 +44,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
+#include <QStandardPaths>
 #include <QVBoxLayout>
 
 // Local includes
@@ -106,7 +107,13 @@ public:
     ListingPurpose        listingPurpose = Private::ListingPurpose::None;
     bool                  sourceIsTags   = false;
     QString               previewSourceId;
+    QString               listingKey;
     QList<ImmichAssetRef> previewAssets;
+    // Contents listings by source ("album:<id>" / "tag:<id>"),
+    // for the session; Refresh clears it. Thumbnails are cached
+    // on disk instead (thumbCacheDir), across sessions.
+    QHash<QString, QList<ImmichAssetRef>> listingCache;
+    QString               thumbCacheDir;
     QHash<QString, QPixmap> thumbCache;
     QHash<QString, QPixmap> coverCache;
     int                   previewGen     = 0;
@@ -194,6 +201,36 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->session = new ImmichSession;
     d->session->load();
     d->talker  = new ImmichTalker(d->session, this);
+
+    // On-disk thumbnail cache (album covers and contents
+    // previews share the /assets/<id>/thumbnail endpoint), in
+    // digiKam's cache directory so it survives restarts. Pruned
+    // oldest-first when it grows past roughly 200 MB.
+    d->thumbCacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                       + QStringLiteral("/immich-thumbs");
+    QDir().mkpath(d->thumbCacheDir);
+
+    {
+        const QFileInfoList files = QDir(d->thumbCacheDir).entryInfoList(
+            QDir::Files, QDir::Time | QDir::Reversed);
+        qint64 total = 0;
+
+        for (const QFileInfo& file : files)
+        {
+            total += file.size();
+        }
+
+        for (const QFileInfo& file : files)
+        {
+            if (total <= 200LL * 1024 * 1024)
+            {
+                break;
+            }
+
+            total -= file.size();
+            QFile::remove(file.absoluteFilePath());
+        }
+    }
 
     setWindowTitle(d->mode == Mode::Export ? QStringLiteral("Export to Immich")
                                            : QStringLiteral("Import from Immich"));
@@ -553,6 +590,24 @@ void ImmichWindow::pumpThumbs()
 
     d->currentThumb = d->thumbJobs.takeFirst();
     d->thumbBusy    = true;
+
+    // Disk cache first: a hit is delivered through the same
+    // completion path as a network reply.
+    QFile cached(d->thumbCacheDir + QLatin1Char('/')
+                 + d->currentThumb.assetId + QStringLiteral(".thumb"));
+
+    if (cached.open(QIODevice::ReadOnly))
+    {
+        const QByteArray bytes = cached.readAll();
+        cached.close();
+
+        if (!bytes.isEmpty())
+        {
+            slotThumbnail(d->currentThumb.assetId, bytes);
+            return;
+        }
+    }
+
     d->talker->fetchThumbnail(d->currentThumb.assetId);
 }
 
@@ -571,6 +626,7 @@ void ImmichWindow::slotRefreshAlbums()
 {
     d->session->setUrl(d->urlEdit->text());
     d->session->setApiKey(d->keyEdit->text());
+    d->listingCache.clear();
 
     if (d->mode == Mode::Import && d->sourceIsTags)
     {
@@ -920,6 +976,13 @@ void ImmichWindow::finishUpload()
     setTransferButtonsEnabled(true);
     d->cancelBtn->setVisible(false);
 
+    if (!d->targetAlbumId.isEmpty())
+    {
+        // The upload changed this album on the server; its
+        // cached contents listing is stale now.
+        d->listingCache.remove(QStringLiteral("album:") + d->targetAlbumId);
+    }
+
     if (!d->tempSidecar.isEmpty())
     {
         QFile::remove(d->tempSidecar);
@@ -1004,6 +1067,8 @@ void ImmichWindow::slotDownloadAlbum()
     d->downloading    = true;
     d->dlListing      = true;
     d->listingPurpose = Private::ListingPurpose::Download;
+    d->listingKey     = (d->sourceIsTags ? QStringLiteral("tag:")
+                                         : QStringLiteral("album:")) + sourceId;
     ++d->previewGen;
     dropThumbJobs(false);
 
@@ -1023,13 +1088,30 @@ void ImmichWindow::slotDownloadAlbum()
 
 void ImmichWindow::startPreview(const QString& sourceId)
 {
-    if (d->uploading || d->downloading || sourceId.isEmpty()
-        || d->listingPurpose != Private::ListingPurpose::None)
+    if (d->uploading || d->downloading || sourceId.isEmpty())
+    {
+        return;
+    }
+
+    const QString key = (d->sourceIsTags ? QStringLiteral("tag:")
+                                         : QStringLiteral("album:")) + sourceId;
+    const auto cached = d->listingCache.constFind(key);
+
+    if (cached != d->listingCache.constEnd())
+    {
+        d->previewSourceId = sourceId;
+        d->previewAssets   = cached.value();
+        fillPreview();
+        return;
+    }
+
+    if (d->listingPurpose != Private::ListingPurpose::None)
     {
         return;
     }
 
     d->previewSourceId = sourceId;
+    d->listingKey      = key;
     ++d->previewGen;
     d->previewList->clear();
     d->previewAssets.clear();
@@ -1126,6 +1208,16 @@ void ImmichWindow::slotThumbnail(const QString& assetId, const QByteArray& bytes
 
         if (pix.loadFromData(bytes))
         {
+            // Persist for the next session (rewriting a cache hit
+            // just refreshes its mtime for the size prune).
+            QFile out(d->thumbCacheDir + QLatin1Char('/') + assetId
+                      + QStringLiteral(".thumb"));
+
+            if (out.open(QIODevice::WriteOnly))
+            {
+                out.write(bytes);
+            }
+
             if (job.cover)
             {
                 d->coverCache.insert(job.key, pix);
@@ -1162,6 +1254,7 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
     {
         d->listingPurpose = Private::ListingPurpose::None;
         d->previewAssets  = assets;
+        d->listingCache.insert(d->listingKey, assets);
         fillPreview();
 
         // The selection moved on while this listing was in flight:
@@ -1186,6 +1279,7 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
     }
 
     d->listingPurpose = Private::ListingPurpose::None;
+    d->listingCache.insert(d->listingKey, assets);
     d->dlListing = false;
     d->dlTotal   = assets.size();
 
