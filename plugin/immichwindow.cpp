@@ -168,7 +168,6 @@ public:
         SyncFields dk;
     };
     QList<SyncJob> syncJobs;
-    int          syncIndex     = 0;
     int          syncUpdated   = 0;
     int          syncClean     = 0;
     int          syncFailed    = 0;
@@ -177,10 +176,23 @@ public:
     bool         syncRan       = false;
     bool         syncPermsDenied = false;
     bool         syncAborted   = false;
-    bool         curSyncFailed = false;
-    bool         curSyncWrote  = false;
-    SyncPlan     curPlan;
-    ServerFields curServer;
+    // Record fetches and scalar writes run a few at a time: a
+    // strictly one-by-one sync made a large no-change export
+    // crawl (one round trip per already-uploaded file, and
+    // Immich has no bulk record endpoint to page instead).
+    int          syncNextIndex = 0;
+    int          syncFetchInFlight = 0;
+    int          syncPatchInFlight = 0;
+    int          syncProcessed = 0;
+    static constexpr int maxSyncFetches = 6;
+    struct SyncAssetCtx
+    {
+        SyncPlan     plan;
+        ServerFields server;
+        bool         failed = false;
+        bool         wrote  = false;
+    };
+    QHash<QString, SyncAssetCtx> syncCtx;
     // Tag values to add, accumulated across the run's assets,
     // applied in bulk at the end: value -> asset ids.
     QMap<QString, QStringList>    syncTagAdds;
@@ -1082,7 +1094,11 @@ void ImmichWindow::slotUploadSelection()
 
     d->syncJobs.clear();
     d->syncTagAdds.clear();
-    d->syncIndex     = 0;
+    d->syncCtx.clear();
+    d->syncNextIndex = 0;
+    d->syncFetchInFlight = 0;
+    d->syncPatchInFlight = 0;
+    d->syncProcessed = 0;
     d->syncUpdated   = 0;
     d->syncClean     = 0;
     d->syncFailed    = 0;
@@ -1337,92 +1353,115 @@ void ImmichWindow::maybeStartSync()
 
     d->syncing = true;
     d->syncRan = true;
-    d->syncIndex = 0;
+    d->syncNextIndex = 0;
+    d->syncFetchInFlight = 0;
+    d->syncPatchInFlight = 0;
+    d->syncProcessed = 0;
     d->status->setText(QStringLiteral("Syncing metadata for %1 already-uploaded items...")
                            .arg(d->syncJobs.size()));
-    nextSyncAsset();
+    pumpSyncFetches();
 }
 
-void ImmichWindow::nextSyncAsset()
+void ImmichWindow::pumpSyncFetches()
 {
-    if (d->syncAborted || d->syncIndex >= d->syncJobs.size())
+    while (!d->syncAborted
+           && d->syncFetchInFlight < Private::maxSyncFetches
+           && d->syncNextIndex < d->syncJobs.size())
     {
-        startSyncTags();
-        return;
+        const Private::SyncJob& job = d->syncJobs.at(d->syncNextIndex);
+        ++d->syncNextIndex;
+        ++d->syncFetchInFlight;
+        d->talker->fetchAssetForSync(job.assetId);
     }
-
-    const Private::SyncJob& job = d->syncJobs.at(d->syncIndex);
-    d->curSyncFailed = false;
-    d->curSyncWrote  = false;
-    d->talker->fetchAssetForSync(job.assetId);
 }
 
 void ImmichWindow::slotSyncRecord(const QString& assetId, const QJsonObject& record, int httpStatus)
 {
-    if (!d->syncing || d->syncIndex >= d->syncJobs.size())
+    if (!d->syncing)
     {
         return;
     }
 
-    const Private::SyncJob job = d->syncJobs.at(d->syncIndex);
+    --d->syncFetchInFlight;
 
-    if (job.assetId != assetId || httpStatus != 200 || record.isEmpty())
+    const Private::SyncJob* job = nullptr;
+
+    for (const Private::SyncJob& candidate : d->syncJobs)
     {
-        d->curSyncFailed = true;
-        finishSyncAsset(false);
+        if (candidate.assetId == assetId)
+        {
+            job = &candidate;
+            break;
+        }
+    }
+
+    if (!job)
+    {
+        pumpSyncFetches();
+        checkSyncPhaseDone();
+        return;
+    }
+
+    Private::SyncAssetCtx ctx;
+
+    if (httpStatus != 200 || record.isEmpty())
+    {
+        ctx.failed = true;
+        d->syncCtx.insert(assetId, ctx);
+        finishSyncAsset(assetId);
+        pumpSyncFetches();
         return;
     }
 
     const ServerFields sv = serverFieldsFromRecord(record);
-    d->curServer = sv;
-    SyncPlan plan = planSync(job.dk, sv.fields);
+    ctx.server = sv;
+    SyncPlan plan = planSync(job->dk, sv.fields);
 
     // Snapshot gating: did either side move since the last sync?
     const QJsonObject snapObj = d->syncState.value(assetId).toObject();
+    const SyncSnapshot snap   = SyncSnapshot::fromJson(snapObj);
+    const GateResult gate     = gateSync(!snapObj.isEmpty(),
+                                         snap.serverUpdatedAt, sv.updatedAt,
+                                         snap.dkHash, syncFieldHash(job->dk),
+                                         QDateTime::fromString(sv.updatedAt, Qt::ISODateWithMs),
+                                         QFileInfo(job->localPath).lastModified());
 
-    if (!snapObj.isEmpty())
+    if (gate.action == GateAction::LeaveAlone)
     {
-        const SyncSnapshot snap = SyncSnapshot::fromJson(snapObj);
-        const bool serverChanged = (snap.serverUpdatedAt != sv.updatedAt);
-        const bool dkChanged     = (snap.dkHash != syncFieldHash(job.dk));
+        // Only Immich moved: leave its state exactly as it is
+        // and refresh the snapshot to match.
+        ++d->syncClean;
+        ++d->syncProcessed;
+        storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.checksum, job->dk);
+        pumpSyncFetches();
+        checkSyncPhaseDone();
+        return;
+    }
 
-        if (serverChanged && !dkChanged)
+    if (gate.conflict)
+    {
+        ++d->syncConflicts;
+
+        if (gate.action == GateAction::DropScalars)
         {
-            // Only Immich moved: leave its state exactly as it
-            // is and refresh the snapshot to match.
-            ++d->syncClean;
-            storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.checksum, job.dk);
-            advanceSyncAsset();
-            return;
-        }
-
-        if (serverChanged && dkChanged)
-        {
-            // Both moved: tags merge anyway (adds are lossless),
-            // but the scalar fields go to whichever side changed
-            // most recently.
-            ++d->syncConflicts;
-            const QDateTime serverTime = QDateTime::fromString(sv.updatedAt, Qt::ISODateWithMs);
-            const QDateTime localTime  = QFileInfo(job.localPath).lastModified();
-
-            if (serverTime.isValid() && localTime.isValid() && serverTime > localTime)
-            {
-                plan.dropScalars();
-            }
+            plan.dropScalars();
         }
     }
 
-    d->curPlan = plan;
+    ctx.plan = plan;
 
     for (const QString& tag : plan.tagsToAdd)
     {
         d->syncTagAdds[tag].append(assetId);
-        d->curSyncWrote = true;
+        ctx.wrote = true;
     }
 
-    if (!plan.scalars())
+    d->syncCtx.insert(assetId, ctx);
+
+    if (!plan.scalars() || d->syncAborted)
     {
-        finishSyncAsset(plan.any());
+        finishSyncAsset(assetId);
+        pumpSyncFetches();
         return;
     }
 
@@ -1445,13 +1484,25 @@ void ImmichWindow::slotSyncRecord(const QString& assetId, const QJsonObject& rec
         body.insert(QStringLiteral("longitude"), plan.longitude);
     }
 
+    ++d->syncPatchInFlight;
     d->talker->updateAsset(assetId, body);
+    pumpSyncFetches();
 }
 
-void ImmichWindow::slotAssetPatched(const QString& /*assetId*/, int httpStatus)
+void ImmichWindow::slotAssetPatched(const QString& assetId, int httpStatus)
 {
     if (!d->syncing)
     {
+        return;
+    }
+
+    --d->syncPatchInFlight;
+
+    auto it = d->syncCtx.find(assetId);
+
+    if (it == d->syncCtx.end())
+    {
+        checkSyncPhaseDone();
         return;
     }
 
@@ -1459,31 +1510,43 @@ void ImmichWindow::slotAssetPatched(const QString& /*assetId*/, int httpStatus)
     {
         d->syncPermsDenied = true;
         d->syncAborted     = true;
-        d->curSyncFailed   = true;
+        it->failed         = true;
     }
     else if (httpStatus < 200 || httpStatus >= 300)
     {
-        d->curSyncFailed = true;
+        it->failed = true;
     }
     else
     {
-        d->curSyncWrote = true;
+        it->wrote = true;
     }
 
-    finishSyncAsset(d->curSyncWrote);
+    finishSyncAsset(assetId);
 }
 
-void ImmichWindow::finishSyncAsset(bool wrote)
+void ImmichWindow::finishSyncAsset(const QString& assetId)
 {
-    const Private::SyncJob job = d->syncJobs.at(d->syncIndex);
+    const Private::SyncAssetCtx ctx = d->syncCtx.take(assetId);
+    ++d->syncProcessed;
 
-    if (d->curSyncFailed)
+    const Private::SyncJob* job = nullptr;
+
+    for (const Private::SyncJob& candidate : d->syncJobs)
+    {
+        if (candidate.assetId == assetId)
+        {
+            job = &candidate;
+            break;
+        }
+    }
+
+    if (ctx.failed || !job)
     {
         ++d->syncFailed;
     }
     else
     {
-        if (wrote)
+        if (ctx.wrote)
         {
             ++d->syncUpdated;
         }
@@ -1494,26 +1557,26 @@ void ImmichWindow::finishSyncAsset(bool wrote)
 
         // Snapshot the post-sync state: server fields as they
         // now stand (its prior values with our plan applied).
-        SyncFields after = d->curServer.fields;
+        SyncFields after = ctx.server.fields;
 
-        if (d->curPlan.setRating)
+        if (ctx.plan.setRating)
         {
-            after.rating = d->curPlan.rating;
+            after.rating = ctx.plan.rating;
         }
 
-        if (d->curPlan.setDescription)
+        if (ctx.plan.setDescription)
         {
-            after.description = d->curPlan.description;
+            after.description = ctx.plan.description;
         }
 
-        if (d->curPlan.setGps)
+        if (ctx.plan.setGps)
         {
             after.hasGps    = true;
-            after.latitude  = d->curPlan.latitude;
-            after.longitude = d->curPlan.longitude;
+            after.latitude  = ctx.plan.latitude;
+            after.longitude = ctx.plan.longitude;
         }
 
-        for (const QString& tag : d->curPlan.tagsToAdd)
+        for (const QString& tag : ctx.plan.tagsToAdd)
         {
             if (!after.tags.contains(tag))
             {
@@ -1521,17 +1584,26 @@ void ImmichWindow::finishSyncAsset(bool wrote)
             }
         }
 
-        storeSnapshot(job.assetId, after, d->curServer.updatedAt,
-                      d->curServer.checksum, job.dk);
+        storeSnapshot(assetId, after, ctx.server.updatedAt,
+                      ctx.server.checksum, job->dk);
     }
 
-    advanceSyncAsset();
+    checkSyncPhaseDone();
 }
 
-void ImmichWindow::advanceSyncAsset()
+void ImmichWindow::checkSyncPhaseDone()
 {
-    ++d->syncIndex;
-    nextSyncAsset();
+    if (!d->syncing)
+    {
+        return;
+    }
+
+    const bool allLaunched = d->syncAborted || d->syncNextIndex >= d->syncJobs.size();
+
+    if (allLaunched && d->syncFetchInFlight == 0 && d->syncPatchInFlight == 0)
+    {
+        startSyncTags();
+    }
 }
 
 void ImmichWindow::startSyncTags()
@@ -1670,6 +1742,7 @@ void ImmichWindow::finishSync()
     d->syncJobs.clear();
     d->syncTagAdds.clear();
     d->syncBulkQueue.clear();
+    d->syncCtx.clear();
     printUploadSummary();
 }
 

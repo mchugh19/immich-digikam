@@ -4,6 +4,7 @@
 #pragma once
 
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -97,6 +98,64 @@ inline ServerFields serverFieldsFromRecord(const QJsonObject& record)
     return out;
 }
 
+// --- snapshot gating -------------------------------------------------
+
+enum class GateAction
+{
+    Push,        // write the plan as computed
+    LeaveAlone,  // only the server changed: keep its state
+    DropScalars  // both changed and the server is newer:
+                 // tags still merge, scalars stay server-side
+};
+
+struct GateResult
+{
+    GateAction action   = GateAction::Push;
+    bool       conflict = false;
+};
+
+// Decides what an export sync may do with one asset, from the
+// snapshot taken at the last sync and both sides' current state.
+// Timestamps are only the tiebreak for the both-changed case.
+inline GateResult gateSync(bool haveSnapshot,
+                           const QString& snapshotServerUpdatedAt,
+                           const QString& serverUpdatedAt,
+                           const QString& snapshotDkHash,
+                           const QString& dkHash,
+                           const QDateTime& serverTime,
+                           const QDateTime& localTime)
+{
+    GateResult result;
+
+    if (!haveSnapshot)
+    {
+        return result;
+    }
+
+    const bool serverChanged = (snapshotServerUpdatedAt != serverUpdatedAt);
+    const bool dkChanged     = (snapshotDkHash != dkHash);
+
+    if (!serverChanged)
+    {
+        return result;
+    }
+
+    if (!dkChanged)
+    {
+        result.action = GateAction::LeaveAlone;
+        return result;
+    }
+
+    result.conflict = true;
+
+    if (serverTime.isValid() && localTime.isValid() && serverTime > localTime)
+    {
+        result.action = GateAction::DropScalars;
+    }
+
+    return result;
+}
+
 // What an export run should write to one existing asset.
 // Tag changes are add-only by design: a tag the server has and
 // digiKam does not is never removed (it may have been set in
@@ -140,10 +199,15 @@ inline SyncPlan planSync(const SyncFields& dk, const SyncFields& server)
         }
     }
 
-    if (dk.rating != server.rating)
+    // Ratings are 0..5 here (0 = unrated); clamp defensively so
+    // a stray digiKam sentinel (-1 = unset) can never reach the
+    // server, where -1 means "rejected".
+    const int dkRating = qBound(0, dk.rating, 5);
+
+    if (dkRating != server.rating)
     {
         plan.setRating = true;
-        plan.rating    = dk.rating;
+        plan.rating    = dkRating;
     }
 
     if (dk.description != server.description)

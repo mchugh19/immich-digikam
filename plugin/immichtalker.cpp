@@ -353,8 +353,11 @@ void ImmichTalker::bulkTagAssets(const QString& tagId, const QStringList& assetI
         ids.append(id);
     }
 
+    // TagBulkAssetsDto in 3.3.3: tagIds is an array too (a
+    // single "tagId" field is rejected with a 400, verified
+    // against the live server).
     const QJsonObject obj {
-        { QStringLiteral("tagId"),    tagId },
+        { QStringLiteral("tagIds"),   QJsonArray { tagId } },
         { QStringLiteral("assetIds"), ids   }
     };
 

@@ -140,9 +140,9 @@ private:
     void finishUpload();
     void printUploadSummary();
     void maybeStartSync();
-    void nextSyncAsset();
-    void finishSyncAsset(bool wrote);
-    void advanceSyncAsset();
+    void pumpSyncFetches();
+    void finishSyncAsset(const QString& assetId);
+    void checkSyncPhaseDone();
     void startSyncTags();
     void handleSyncTagList(const QList<ImmichTag>& tags);
     void nextTagCreate();
