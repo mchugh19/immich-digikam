@@ -79,6 +79,11 @@ private Q_SLOTS:
     void slotSaveSettings();
     void slotRefreshAlbums();
     void slotAlbums(const QList<ImmichAlbum>& albums);
+    void slotTags(const QList<ImmichTag>& tags);
+    void slotSourceChanged();
+    void slotFilterChanged(const QString& text);
+    void slotPreviewSortChanged();
+    void slotThumbnail(const QString& assetId, const QByteArray& bytes);
     void slotNewAlbum();
     void slotAlbumCreated(const ImmichAlbum& album);
     void slotUploadSelection();
@@ -97,6 +102,10 @@ private Q_SLOTS:
 private:
 
     void setTransferButtonsEnabled(bool enabled);
+    void applyFilter();
+    void startPreview(const QString& sourceId);
+    void fillPreview();
+    void nextThumbnail();
     void nextUpload();
     void finishUpload();
     void nextDownload();

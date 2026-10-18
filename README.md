@@ -75,11 +75,11 @@ plugins use:
   a chosen folder today; plugging into digiKam's import flow so
   downloaded albums land in a digiKam album directly is the
   remaining step.
-- **A remote album browser**: navigate the server's albums
-  inside the plugin (sorted, searchable, create, rename, asset
-  counts) as the target picker for both directions, instead of
-  the current flat album list. The Piwigo plugin's album browser
-  is the model for the browser itself. One deliberate difference
-  from Piwigo: there is no staged upload queue. The selection
-  made in digiKam is the upload set; the window does not
-  re-browse or re-stage it.
+- **A richer album browser**: the source lists are sorted and
+  filterable today, and the import tool previews a source's
+  contents; what remains from the full browser is album rename
+  and a create dialog with more than a name (the Piwigo
+  plugin's album browser is the model). One deliberate
+  difference from Piwigo: there is no staged upload queue. The
+  selection made in digiKam is the upload set; the window does
+  not re-browse or re-stage it.

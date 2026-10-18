@@ -9,15 +9,21 @@ digiKam's own web-service plugins (Piwigo in particular).
 
 - Server URL and API key stored in digiKam's configuration
   (KConfig group "Immich Settings").
-- Album list read from the server; the selected album is the
-  upload target, shown in an "Upload target" label.
+- Album list read from the server, sorted by name, with a
+  filter box; the selected album is the upload target, shown in
+  an "Upload target" label.
+- Import source switch (albums or tags): the import tool can
+  pull an album or every asset carrying a tag. Selecting a
+  source previews its contents as thumbnails (sortable by date
+  or name, filterable with the same filter box) before anything
+  is downloaded.
 - Upload: each selected item is sent with an XMP sidecar taken
   from, in order, an on-disk sidecar next to the file, a sidecar
   generated from the item's metadata in digiKam's database (tags,
   rating, caption, GPS), or the file's embedded XMP packet.
-- Download: the selected album's originals and sidecars are
-  written into a chosen folder; files already on disk are
-  skipped. When the server holds no sidecar file for an asset,
+- Download: the selected album's or tag's originals and
+  sidecars are written into a chosen folder; files already on
+  disk are skipped. When the server holds no sidecar file for an asset,
   one is generated from the Immich asset record (tags, rating,
   caption, GPS), so the metadata arrives with the photo and
   digiKam imports it on scan.
@@ -28,7 +34,7 @@ digiKam's own web-service plugins (Piwigo in particular).
 
 Tested against Immich 3.3.3. The API key needs these permissions:
 `asset.upload`, `asset.read`, `asset.view`, `asset.download`,
-`album.read`, `album.create`, `albumAsset.create`.
+`album.read`, `album.create`, `albumAsset.create`, `tag.read`.
 
 ## Build
 

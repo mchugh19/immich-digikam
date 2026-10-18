@@ -20,6 +20,7 @@
 
 // Qt includes
 
+#include <algorithm>
 #include <cmath>
 
 #include <QCryptographicHash>
@@ -28,9 +29,14 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QComboBox>
+#include <QHash>
+#include <QHBoxLayout>
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
+#include <QPixmap>
+#include <QRadioButton>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QProgressBar>
@@ -60,7 +66,12 @@ public:
 
     QLineEdit*    urlEdit     = nullptr;
     QLineEdit*    keyEdit     = nullptr;
+    QLineEdit*    filterEdit  = nullptr;
+    QRadioButton* albumsSrc   = nullptr;
+    QRadioButton* tagsSrc     = nullptr;
     QListWidget*  albumList   = nullptr;
+    QListWidget*  previewList = nullptr;
+    QComboBox*    previewSort = nullptr;
     QLabel*       targetLabel = nullptr;
     QLabel*       status      = nullptr;
     QPushButton*  refreshBtn  = nullptr;
@@ -84,6 +95,19 @@ public:
     bool         uploading   = false;
     bool         checking    = false;
     bool         cancelling  = false;
+
+    // Import source + preview state. The listing machinery is
+    // shared between the contents preview and a real download;
+    // listingPurpose says which one a listing result belongs to.
+    enum class ListingPurpose { None, Preview, Download };
+    ListingPurpose        listingPurpose = Private::ListingPurpose::None;
+    bool                  sourceIsTags   = false;
+    QString               previewSourceId;
+    QList<ImmichAssetRef> previewAssets;
+    QStringList           thumbQueue;
+    QHash<QString, QPixmap> thumbCache;
+    int                   previewGen     = 0;
+    bool                  thumbInFlight  = false;
 
     // Download queue state.
     QList<ImmichAssetRef> dlPending;
@@ -126,22 +150,67 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->cancelBtn        = new QPushButton(QStringLiteral("Cancel transfer"));
     d->cancelBtn->setVisible(false);
     d->albumList        = new QListWidget;
+    d->filterEdit       = new QLineEdit;
+    d->filterEdit->setPlaceholderText(QStringLiteral("Filter..."));
+    d->filterEdit->setClearButtonEnabled(true);
+    d->albumsSrc        = new QRadioButton(QStringLiteral("Albums"));
+    d->tagsSrc          = new QRadioButton(QStringLiteral("Tags"));
+    d->albumsSrc->setChecked(true);
+    d->previewList      = new QListWidget;
+    d->previewList->setViewMode(QListWidget::IconMode);
+    d->previewList->setIconSize(QSize(96, 96));
+    d->previewList->setResizeMode(QListWidget::Adjust);
+    d->previewList->setMovement(QListWidget::Static);
+    d->previewList->setSpacing(4);
+    d->previewList->setUniformItemSizes(true);
+    d->previewList->setWordWrap(true);
+    d->previewSort      = new QComboBox;
+    d->previewSort->addItems({ QStringLiteral("Date (oldest first)"),
+                               QStringLiteral("Date (newest first)"),
+                               QStringLiteral("Name") });
     d->targetLabel      = new QLabel(QStringLiteral("Upload target: no album (library only)"));
     d->progress         = new QProgressBar;
     d->progress->setVisible(false);
     d->status           = new QLabel;
 
-    // Each tool shows only its own direction's actions.
+    // Each tool shows only its own direction's actions. The source
+    // switch and the contents preview belong to the import tool;
+    // the filter serves the source list in both.
     d->targetLabel->setVisible(d->mode == Mode::Export);
     d->uploadBtn->setVisible(d->mode == Mode::Export);
     d->downloadBtn->setVisible(d->mode == Mode::Import);
+
+    auto* const sourceRow = new QHBoxLayout;
+    sourceRow->addWidget(new QLabel(QStringLiteral("Import from:")));
+    sourceRow->addWidget(d->albumsSrc);
+    sourceRow->addWidget(d->tagsSrc);
+    sourceRow->addStretch();
+
+    auto* const previewRow = new QHBoxLayout;
+    previewRow->addWidget(new QLabel(QStringLiteral("Contents:")));
+    previewRow->addWidget(d->previewSort);
+    previewRow->addStretch();
 
     auto* const layout = new QVBoxLayout(this);
     layout->addLayout(form);
     layout->addWidget(saveBtn);
     layout->addWidget(d->refreshBtn);
     layout->addWidget(d->newAlbumBtn);
+    layout->addWidget(d->filterEdit);
+
+    if (d->mode == Mode::Import)
+    {
+        layout->addLayout(sourceRow);
+    }
+
     layout->addWidget(d->albumList);
+
+    if (d->mode == Mode::Import)
+    {
+        layout->addLayout(previewRow);
+        layout->addWidget(d->previewList);
+    }
+
     layout->addWidget(d->targetLabel);
     layout->addWidget(d->uploadBtn);
     layout->addWidget(d->downloadBtn);
@@ -160,7 +229,18 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
                 d->targetLabel->setText(current
                     ? QStringLiteral("Upload target: %1").arg(current->data(Qt::UserRole + 1).toString())
                     : QStringLiteral("Upload target: no album (library only)"));
+
+                if (current && d->mode == Mode::Import)
+                {
+                    startPreview(current->data(Qt::UserRole).toString());
+                }
             });
+    connect(d->talker, &ImmichTalker::signalTags, this, &ImmichWindow::slotTags);
+    connect(d->talker, &ImmichTalker::signalThumbnail, this, &ImmichWindow::slotThumbnail);
+    connect(d->albumsSrc, &QRadioButton::toggled, this, &ImmichWindow::slotSourceChanged);
+    connect(d->tagsSrc, &QRadioButton::toggled, this, &ImmichWindow::slotSourceChanged);
+    connect(d->filterEdit, &QLineEdit::textChanged, this, &ImmichWindow::slotFilterChanged);
+    connect(d->previewSort, &QComboBox::currentIndexChanged, this, &ImmichWindow::slotPreviewSortChanged);
     connect(d->downloadBtn, &QPushButton::clicked, this, &ImmichWindow::slotDownloadAlbum);
     connect(d->cancelBtn, &QPushButton::clicked, this, &ImmichWindow::slotCancelTransfer);
     connect(d->talker, &ImmichTalker::signalAlbums, this, &ImmichWindow::slotAlbums);
@@ -198,7 +278,99 @@ void ImmichWindow::slotRefreshAlbums()
 {
     d->session->setUrl(d->urlEdit->text());
     d->session->setApiKey(d->keyEdit->text());
-    d->talker->listAlbums();
+
+    if (d->mode == Mode::Import && d->sourceIsTags)
+    {
+        d->talker->listTags();
+    }
+    else
+    {
+        d->talker->listAlbums();
+    }
+}
+
+void ImmichWindow::slotSourceChanged()
+{
+    const bool tags = d->tagsSrc->isChecked();
+
+    if (tags == d->sourceIsTags)
+    {
+        return;
+    }
+
+    d->sourceIsTags = tags;
+    d->newAlbumBtn->setEnabled(!tags);
+    d->albumList->clear();
+    d->previewList->clear();
+    d->previewAssets.clear();
+    d->thumbQueue.clear();
+    ++d->previewGen;
+    slotRefreshAlbums();
+}
+
+void ImmichWindow::applyFilter()
+{
+    const QString text = d->filterEdit->text();
+
+    for (int i = 0 ; i < d->albumList->count() ; ++i)
+    {
+        QListWidgetItem* const item = d->albumList->item(i);
+        item->setHidden(!text.isEmpty()
+                        && !item->data(Qt::UserRole + 1).toString().contains(text, Qt::CaseInsensitive));
+    }
+
+    if (d->mode == Mode::Import)
+    {
+        for (int i = 0 ; i < d->previewList->count() ; ++i)
+        {
+            QListWidgetItem* const item = d->previewList->item(i);
+            item->setHidden(!text.isEmpty()
+                            && !item->text().contains(text, Qt::CaseInsensitive));
+        }
+    }
+}
+
+void ImmichWindow::slotFilterChanged(const QString&)
+{
+    applyFilter();
+}
+
+void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
+{
+    QListWidgetItem* const previous = d->albumList->currentItem();
+    const QString restoreId = previous ? previous->data(Qt::UserRole).toString()
+                                       : QString();
+
+    d->albumList->clear();
+
+    QList<ImmichTag> sorted = tags;
+    std::sort(sorted.begin(), sorted.end(),
+              [](const ImmichTag& a, const ImmichTag& b)
+              {
+                  return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
+              });
+
+    QListWidgetItem* selectItem = nullptr;
+
+    for (const ImmichTag& tag : sorted)
+    {
+        auto* const item = new QListWidgetItem(tag.name, d->albumList);
+        item->setData(Qt::UserRole, tag.id);
+        item->setData(Qt::UserRole + 1, tag.name);
+
+        if (tag.id == restoreId)
+        {
+            selectItem = item;
+        }
+    }
+
+    if (selectItem)
+    {
+        d->albumList->setCurrentItem(selectItem);
+    }
+
+    applyFilter();
+    d->status->setText(QStringLiteral("%1 tags").arg(tags.size()));
 }
 
 void ImmichWindow::setTransferButtonsEnabled(bool enabled)
@@ -252,9 +424,16 @@ void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
 
     d->albumList->clear();
 
+    QList<ImmichAlbum> sorted = albums;
+    std::sort(sorted.begin(), sorted.end(),
+              [](const ImmichAlbum& a, const ImmichAlbum& b)
+              {
+                  return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
+              });
+
     QListWidgetItem* selectItem = nullptr;
 
-    for (const ImmichAlbum& album : albums)
+    for (const ImmichAlbum& album : sorted)
     {
         auto* const item = new QListWidgetItem(
             QStringLiteral("%1 (%2)").arg(album.name).arg(album.assetCount), d->albumList);
@@ -272,6 +451,7 @@ void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
         d->albumList->setCurrentItem(selectItem);
     }
 
+    applyFilter();
     d->status->setText(QStringLiteral("%1 albums").arg(albums.size()));
 }
 
@@ -495,7 +675,7 @@ void ImmichWindow::slotDownloadAlbum()
 
     if (!albumItem)
     {
-        d->status->setText(QStringLiteral("Select an album to download."));
+        d->status->setText(QStringLiteral("Select an album or tag to download."));
         return;
     }
 
@@ -519,18 +699,171 @@ void ImmichWindow::slotDownloadAlbum()
     d->dlDownloaded  = 0;
     d->dlSkipped     = 0;
     d->dlFailed      = 0;
-    d->downloading   = true;
-    d->dlListing     = true;
+    d->downloading    = true;
+    d->dlListing      = true;
+    d->listingPurpose = Private::ListingPurpose::Download;
+    ++d->previewGen;
+    d->thumbQueue.clear();
 
     setTransferButtonsEnabled(false);
     d->cancelBtn->setVisible(true);
-    d->status->setText(QStringLiteral("Listing album assets..."));
+    d->status->setText(QStringLiteral("Listing assets..."));
 
-    d->talker->listAlbumAssets(albumItem->data(Qt::UserRole).toString());
+    if (d->sourceIsTags)
+    {
+        d->talker->listTagAssets(albumItem->data(Qt::UserRole).toString());
+    }
+    else
+    {
+        d->talker->listAlbumAssets(albumItem->data(Qt::UserRole).toString());
+    }
+}
+
+void ImmichWindow::startPreview(const QString& sourceId)
+{
+    if (d->uploading || d->downloading || sourceId.isEmpty()
+        || d->listingPurpose != Private::ListingPurpose::None)
+    {
+        return;
+    }
+
+    d->previewSourceId = sourceId;
+    ++d->previewGen;
+    d->previewList->clear();
+    d->previewAssets.clear();
+    d->thumbQueue.clear();
+    d->listingPurpose = Private::ListingPurpose::Preview;
+    d->status->setText(QStringLiteral("Listing contents..."));
+
+    if (d->sourceIsTags)
+    {
+        d->talker->listTagAssets(sourceId);
+    }
+    else
+    {
+        d->talker->listAlbumAssets(sourceId);
+    }
+}
+
+void ImmichWindow::fillPreview()
+{
+    d->previewList->clear();
+    d->thumbQueue.clear();
+
+    QList<ImmichAssetRef> sorted = d->previewAssets;
+
+    switch (d->previewSort->currentIndex())
+    {
+        case 1:
+            std::sort(sorted.begin(), sorted.end(),
+                      [](const ImmichAssetRef& a, const ImmichAssetRef& b)
+                      { return a.fileCreatedAt > b.fileCreatedAt; });
+            break;
+
+        case 2:
+            std::sort(sorted.begin(), sorted.end(),
+                      [](const ImmichAssetRef& a, const ImmichAssetRef& b)
+                      { return QString::compare(a.fileName, b.fileName, Qt::CaseInsensitive) < 0; });
+            break;
+
+        default:
+            std::sort(sorted.begin(), sorted.end(),
+                      [](const ImmichAssetRef& a, const ImmichAssetRef& b)
+                      { return a.fileCreatedAt < b.fileCreatedAt; });
+            break;
+    }
+
+    for (const ImmichAssetRef& asset : sorted)
+    {
+        auto* const item = new QListWidgetItem(asset.fileName, d->previewList);
+        item->setData(Qt::UserRole, asset.id);
+        item->setToolTip(asset.fileCreatedAt.left(10));
+
+        const auto cached = d->thumbCache.constFind(asset.id);
+
+        if (cached != d->thumbCache.constEnd())
+        {
+            item->setIcon(QIcon(*cached));
+        }
+        else
+        {
+            d->thumbQueue << asset.id;
+        }
+    }
+
+    applyFilter();
+    d->status->setText(QStringLiteral("%1 items").arg(sorted.size()));
+    nextThumbnail();
+}
+
+void ImmichWindow::slotPreviewSortChanged()
+{
+    if (!d->previewAssets.isEmpty())
+    {
+        fillPreview();
+    }
+}
+
+void ImmichWindow::nextThumbnail()
+{
+    if (d->thumbInFlight || d->thumbQueue.isEmpty())
+    {
+        return;
+    }
+
+    d->thumbInFlight = true;
+    d->talker->fetchThumbnail(d->thumbQueue.takeFirst());
+}
+
+void ImmichWindow::slotThumbnail(const QString& assetId, const QByteArray& bytes)
+{
+    d->thumbInFlight = false;
+
+    if (!bytes.isEmpty())
+    {
+        QPixmap pix;
+
+        if (pix.loadFromData(bytes))
+        {
+            d->thumbCache.insert(assetId, pix);
+
+            for (int i = 0 ; i < d->previewList->count() ; ++i)
+            {
+                QListWidgetItem* const item = d->previewList->item(i);
+
+                if (item->data(Qt::UserRole).toString() == assetId)
+                {
+                    item->setIcon(QIcon(pix));
+                    break;
+                }
+            }
+        }
+    }
+
+    nextThumbnail();
 }
 
 void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
 {
+    if (d->listingPurpose == Private::ListingPurpose::Preview)
+    {
+        d->listingPurpose = Private::ListingPurpose::None;
+        d->previewAssets  = assets;
+        fillPreview();
+
+        // The selection moved on while this listing was in flight:
+        // preview what is selected now.
+        QListWidgetItem* const current = d->albumList->currentItem();
+
+        if (current && current->data(Qt::UserRole).toString() != d->previewSourceId)
+        {
+            startPreview(current->data(Qt::UserRole).toString());
+        }
+
+        return;
+    }
+
+    d->listingPurpose = Private::ListingPurpose::None;
     d->dlListing = false;
     d->dlTotal   = assets.size();
 
