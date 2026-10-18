@@ -21,6 +21,9 @@
 
 #include <QDialog>
 #include <QJsonObject>
+#include <QPixmap>
+
+class QListWidgetItem;
 
 // Local includes
 
@@ -106,12 +109,13 @@ private:
 
     void setTransferButtonsEnabled(bool enabled);
     void applyFilter();
-    int  findSourceRow(const QString& id) const;
+    QListWidgetItem* findAlbumItem(const QString& id) const;
     QString currentSourceId() const;
     QString currentSourceName() const;
-    void addSourceRow(const QString& id, const QString& name,
+    void addAlbumTile(const QString& id, const QString& name,
                       const QString& countText, const QString& rangeText,
                       const QString& thumbnailAssetId);
+    void setAlbumCover(QListWidgetItem* item, const QPixmap& pix);
     void selectSource(const QString& id);
     void queueThumb(bool cover, const QString& key, const QString& assetId);
     void pumpThumbs();

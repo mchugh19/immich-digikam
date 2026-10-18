@@ -29,12 +29,11 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFrame>
 #include <QComboBox>
 #include <QDateTime>
 #include <QHash>
-#include <QHeaderView>
 #include <QHBoxLayout>
-#include <QTableWidget>
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
@@ -72,7 +71,8 @@ public:
     QLineEdit*    filterEdit  = nullptr;
     QRadioButton* albumsSrc   = nullptr;
     QRadioButton* tagsSrc     = nullptr;
-    QTableWidget* sourceTable = nullptr;
+    QListWidget*  albumGrid   = nullptr;
+    QListWidget*  tagGrid     = nullptr;
     QListWidget*  previewList = nullptr;
     QComboBox*    previewSort = nullptr;
     QLabel*       targetLabel = nullptr;
@@ -112,7 +112,7 @@ public:
     int                   previewGen     = 0;
 
     // One serialized thumbnail pipeline serves both the preview
-    // grid and the album covers in the source table.
+    // grid and the album covers on the album tiles.
     struct ThumbJob
     {
         bool    cover   = false;
@@ -198,7 +198,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     setWindowTitle(d->mode == Mode::Export ? QStringLiteral("Export to Immich")
                                            : QStringLiteral("Import from Immich"));
 
-    // A functional default: the source table and the preview grid
+    // A functional default: the source tiles and the preview grid
     // are the working area, and both are cramped at the layout's
     // raw size hint. Growth goes to them via the layout stretch.
     resize(1040, 760);
@@ -216,32 +216,48 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->refreshBtn       = new QPushButton(QStringLiteral("Refresh albums"));
     d->newAlbumBtn      = new QPushButton(QStringLiteral("New album..."));
     d->uploadBtn        = new QPushButton(QStringLiteral("Upload selection"));
-    d->downloadBtn      = new QPushButton(QStringLiteral("Download album"));
+    d->downloadBtn      = new QPushButton(QStringLiteral("Download"));
     d->cancelBtn        = new QPushButton(QStringLiteral("Cancel transfer"));
     d->cancelBtn->setVisible(false);
-    d->sourceTable      = new QTableWidget(0, 3);
-    d->sourceTable->setHorizontalHeaderLabels({ QStringLiteral("Album"),
-                                                QStringLiteral("Items"),
-                                                QStringLiteral("Date range") });
-    d->sourceTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    d->sourceTable->setSelectionMode(QAbstractItemView::SingleSelection);
-    d->sourceTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    d->sourceTable->verticalHeader()->setVisible(false);
-    d->sourceTable->verticalHeader()->setDefaultSectionSize(58);
-    d->sourceTable->setIconSize(QSize(72, 54));
-    d->sourceTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    d->sourceTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    d->sourceTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    d->sourceTable->setShowGrid(false);
+    // Albums are tiles, like Immich's own Albums page: a large
+    // cover, the name under it in a larger font, then the date
+    // range and the item count in smaller type. Each tile is a
+    // small widget hosted by a list item (see addAlbumTile).
+    d->albumGrid        = new QListWidget;
+    d->albumGrid->setViewMode(QListWidget::IconMode);
+    d->albumGrid->setResizeMode(QListWidget::Adjust);
+    d->albumGrid->setMovement(QListWidget::Static);
+    d->albumGrid->setSpacing(6);
+    d->albumGrid->setGridSize(QSize(208, 248));
+    d->albumGrid->setUniformItemSizes(true);
+    d->albumGrid->setSelectionMode(QAbstractItemView::SingleSelection);
     d->filterEdit       = new QLineEdit;
     d->filterEdit->setPlaceholderText(QStringLiteral("Filter..."));
     d->filterEdit->setClearButtonEnabled(true);
     d->albumsSrc        = new QRadioButton(QStringLiteral("Albums"));
     d->tagsSrc          = new QRadioButton(QStringLiteral("Tags"));
     d->albumsSrc->setChecked(true);
+    // Tags carry no counts or dates: they get a simpler tile
+    // grid like Immich's own Tags page, swapped in for the album
+    // tiles when Tags is the source.
+    d->tagGrid          = new QListWidget;
+    d->tagGrid->setViewMode(QListWidget::IconMode);
+    d->tagGrid->setIconSize(QSize(48, 48));
+    d->tagGrid->setGridSize(QSize(132, 104));
+    d->tagGrid->setResizeMode(QListWidget::Adjust);
+    d->tagGrid->setMovement(QListWidget::Static);
+    d->tagGrid->setSpacing(4);
+    d->tagGrid->setWordWrap(true);
+    d->tagGrid->setUniformItemSizes(true);
+    d->tagGrid->setVisible(false);
     d->previewList      = new QListWidget;
     d->previewList->setViewMode(QListWidget::IconMode);
     d->previewList->setIconSize(QSize(96, 96));
+    // Fixed cell size: items are created before their thumbnails
+    // stream in, and without a grid size the widget sizes cells
+    // from the (still empty) icons, leaving the late-arriving
+    // thumbnails squashed until a rebuild relayouts them.
+    d->previewList->setGridSize(QSize(116, 128));
     d->previewList->setResizeMode(QListWidget::Adjust);
     d->previewList->setMovement(QListWidget::Static);
     d->previewList->setSpacing(4);
@@ -261,6 +277,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     // the filter serves the source list in both.
     d->targetLabel->setVisible(d->mode == Mode::Export);
     d->uploadBtn->setVisible(d->mode == Mode::Export);
+    d->newAlbumBtn->setVisible(d->mode == Mode::Export);
     d->downloadBtn->setVisible(d->mode == Mode::Import);
 
     auto* const sourceRow = new QHBoxLayout;
@@ -276,9 +293,22 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
 
     auto* const layout = new QVBoxLayout(this);
     layout->addLayout(form);
-    layout->addWidget(saveBtn);
-    layout->addWidget(d->refreshBtn);
-    layout->addWidget(d->newAlbumBtn);
+
+    // The settings actions sit with the settings they belong to,
+    // at natural width, instead of stretching across the dialog.
+    auto* const settingsBtnRow = new QHBoxLayout;
+    settingsBtnRow->addWidget(saveBtn);
+    settingsBtnRow->addWidget(d->refreshBtn);
+    settingsBtnRow->addWidget(d->newAlbumBtn);
+    settingsBtnRow->addStretch();
+    layout->addLayout(settingsBtnRow);
+
+    // A rule between the server settings and the working view.
+    auto* const separator = new QFrame;
+    separator->setFrameShape(QFrame::HLine);
+    separator->setFrameShadow(QFrame::Sunken);
+    layout->addWidget(separator);
+
     layout->addWidget(d->filterEdit);
 
     if (d->mode == Mode::Import)
@@ -286,7 +316,8 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
         layout->addLayout(sourceRow);
     }
 
-    layout->addWidget(d->sourceTable, 2);
+    layout->addWidget(d->albumGrid, 2);
+    layout->addWidget(d->tagGrid, 2);
 
     if (d->mode == Mode::Import)
     {
@@ -306,15 +337,40 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     connect(d->newAlbumBtn, &QPushButton::clicked, this, &ImmichWindow::slotNewAlbum);
     connect(d->talker, &ImmichTalker::signalAlbumCreated, this, &ImmichWindow::slotAlbumCreated);
     connect(d->uploadBtn, &QPushButton::clicked, this, &ImmichWindow::slotUploadSelection);
-    connect(d->sourceTable, &QTableWidget::currentCellChanged, this,
-            [this](int row, int, int, int)
+    connect(d->albumGrid, &QListWidget::currentItemChanged, this,
+            [this](QListWidgetItem* item)
             {
-                QTableWidgetItem* const item = (row >= 0) ? d->sourceTable->item(row, 0)
-                                                          : nullptr;
                 d->targetLabel->setText(item
                     ? QStringLiteral("Upload target: %1").arg(item->data(Qt::UserRole + 1).toString())
                     : QStringLiteral("Upload target: no album (library only)"));
 
+                if (item && d->mode == Mode::Import)
+                {
+                    startPreview(item->data(Qt::UserRole).toString());
+                }
+            });
+    connect(d->albumGrid, &QListWidget::itemClicked, this,
+            [this](QListWidgetItem* item)
+            {
+                if (item && d->mode == Mode::Import)
+                {
+                    startPreview(item->data(Qt::UserRole).toString());
+                }
+            });
+    connect(d->tagGrid, &QListWidget::currentItemChanged, this,
+            [this](QListWidgetItem* item)
+            {
+                if (item && d->mode == Mode::Import)
+                {
+                    startPreview(item->data(Qt::UserRole).toString());
+                }
+            });
+    // A click on the already-current tile retries the preview;
+    // currentItemChanged alone would not fire again after an
+    // error left the tile selected with no contents shown.
+    connect(d->tagGrid, &QListWidget::itemClicked, this,
+            [this](QListWidgetItem* item)
+            {
                 if (item && d->mode == Mode::Import)
                 {
                     startPreview(item->data(Qt::UserRole).toString());
@@ -361,50 +417,94 @@ void ImmichWindow::slotSaveSettings()
     d->status->setText(QStringLiteral("Settings saved."));
 }
 
-int ImmichWindow::findSourceRow(const QString& id) const
+QListWidgetItem* ImmichWindow::findAlbumItem(const QString& id) const
 {
-    for (int row = 0 ; row < d->sourceTable->rowCount() ; ++row)
+    for (int i = 0 ; i < d->albumGrid->count() ; ++i)
     {
-        if (d->sourceTable->item(row, 0)->data(Qt::UserRole).toString() == id)
+        if (d->albumGrid->item(i)->data(Qt::UserRole).toString() == id)
         {
-            return row;
+            return d->albumGrid->item(i);
         }
     }
 
-    return -1;
+    return nullptr;
 }
 
 QString ImmichWindow::currentSourceId() const
 {
-    const int row = d->sourceTable->currentRow();
-    return (row >= 0) ? d->sourceTable->item(row, 0)->data(Qt::UserRole).toString()
-                      : QString();
+    QListWidgetItem* const item = d->sourceIsTags ? d->tagGrid->currentItem()
+                                                  : d->albumGrid->currentItem();
+    return item ? item->data(Qt::UserRole).toString() : QString();
 }
 
 QString ImmichWindow::currentSourceName() const
 {
-    const int row = d->sourceTable->currentRow();
-    return (row >= 0) ? d->sourceTable->item(row, 0)->data(Qt::UserRole + 1).toString()
-                      : QString();
+    QListWidgetItem* const item = d->sourceIsTags ? d->tagGrid->currentItem()
+                                                  : d->albumGrid->currentItem();
+    return item ? item->data(Qt::UserRole + 1).toString() : QString();
 }
 
-void ImmichWindow::addSourceRow(const QString& id, const QString& name,
+void ImmichWindow::setAlbumCover(QListWidgetItem* item, const QPixmap& pix)
+{
+    QWidget* const tile = item ? d->albumGrid->itemWidget(item) : nullptr;
+    QLabel* const cover = tile ? tile->findChild<QLabel*>(QStringLiteral("cover"))
+                               : nullptr;
+
+    if (cover)
+    {
+        // Fill the cover frame, cropping the overflow, the way
+        // Immich's album grid presents covers of any aspect.
+        cover->setPixmap(pix.scaled(cover->size(), Qt::KeepAspectRatioByExpanding,
+                                    Qt::SmoothTransformation));
+    }
+}
+
+void ImmichWindow::addAlbumTile(const QString& id, const QString& name,
                                 const QString& countText, const QString& rangeText,
                                 const QString& thumbnailAssetId)
 {
-    const int row = d->sourceTable->rowCount();
-    d->sourceTable->insertRow(row);
+    auto* const item = new QListWidgetItem(d->albumGrid);
+    item->setData(Qt::UserRole, id);
+    item->setData(Qt::UserRole + 1, name);
+    item->setSizeHint(QSize(208, 248));
+    item->setToolTip(name);
 
-    auto* const nameItem = new QTableWidgetItem(name);
-    nameItem->setData(Qt::UserRole, id);
-    nameItem->setData(Qt::UserRole + 1, name);
-    d->sourceTable->setItem(row, 0, nameItem);
+    auto* const tile = new QWidget;
+    auto* const tileLayout = new QVBoxLayout(tile);
+    tileLayout->setContentsMargins(6, 6, 6, 6);
+    tileLayout->setSpacing(2);
 
-    auto* const countItem = new QTableWidgetItem(countText);
-    countItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    d->sourceTable->setItem(row, 1, countItem);
+    auto* const cover = new QLabel;
+    cover->setObjectName(QStringLiteral("cover"));
+    cover->setFixedSize(184, 138);
+    cover->setAlignment(Qt::AlignCenter);
+    cover->setStyleSheet(QStringLiteral("background: #2b2b2b; border-radius: 6px;"));
+    tileLayout->addWidget(cover);
 
-    d->sourceTable->setItem(row, 2, new QTableWidgetItem(rangeText));
+    auto* const nameLabel = new QLabel(name);
+    QFont nameFont = nameLabel->font();
+    nameFont.setBold(true);
+    nameFont.setPointSize(nameFont.pointSize() + 2);
+    nameLabel->setFont(nameFont);
+    nameLabel->setWordWrap(true);
+    tileLayout->addWidget(nameLabel);
+
+    if (!rangeText.isEmpty())
+    {
+        auto* const rangeLabel = new QLabel(rangeText);
+        rangeLabel->setStyleSheet(QStringLiteral("color: #9a9a9a;"));
+        tileLayout->addWidget(rangeLabel);
+    }
+
+    if (!countText.isEmpty())
+    {
+        auto* const countLabel = new QLabel(QStringLiteral("%1 items").arg(countText));
+        countLabel->setStyleSheet(QStringLiteral("color: #9a9a9a;"));
+        tileLayout->addWidget(countLabel);
+    }
+
+    tileLayout->addStretch();
+    d->albumGrid->setItemWidget(item, tile);
 
     if (!thumbnailAssetId.isEmpty())
     {
@@ -412,7 +512,7 @@ void ImmichWindow::addSourceRow(const QString& id, const QString& name,
 
         if (cached != d->coverCache.constEnd())
         {
-            nameItem->setIcon(QIcon(*cached));
+            setAlbumCover(item, *cached);
         }
         else
         {
@@ -423,11 +523,9 @@ void ImmichWindow::addSourceRow(const QString& id, const QString& name,
 
 void ImmichWindow::selectSource(const QString& id)
 {
-    const int row = findSourceRow(id);
-
-    if (row >= 0)
+    if (QListWidgetItem* const item = findAlbumItem(id))
     {
-        d->sourceTable->setCurrentCell(row, 0);
+        d->albumGrid->setCurrentItem(item);
     }
 }
 
@@ -495,12 +593,24 @@ void ImmichWindow::slotSourceChanged()
 
     d->sourceIsTags = tags;
     d->newAlbumBtn->setEnabled(!tags);
-    d->sourceTable->setRowCount(0);
+    d->albumGrid->setVisible(!tags);
+    d->tagGrid->setVisible(tags);
+    d->albumGrid->clear();
+    d->tagGrid->clear();
     d->previewList->clear();
     d->previewAssets.clear();
     dropThumbJobs(false);
     dropThumbJobs(true);
     ++d->previewGen;
+
+    if (!d->downloading)
+    {
+        // A listing for the old source may never report back (the
+        // talker drops superseded pages), so do not let its purpose
+        // block previews of the new source.
+        d->listingPurpose = Private::ListingPurpose::None;
+    }
+
     slotRefreshAlbums();
 }
 
@@ -508,11 +618,19 @@ void ImmichWindow::applyFilter()
 {
     const QString text = d->filterEdit->text();
 
-    for (int row = 0 ; row < d->sourceTable->rowCount() ; ++row)
+    for (int i = 0 ; i < d->albumGrid->count() ; ++i)
     {
-        const QString name = d->sourceTable->item(row, 0)->data(Qt::UserRole + 1).toString();
-        d->sourceTable->setRowHidden(row, !text.isEmpty()
-                                          && !name.contains(text, Qt::CaseInsensitive));
+        QListWidgetItem* const item = d->albumGrid->item(i);
+        const QString name = item->data(Qt::UserRole + 1).toString();
+        item->setHidden(!text.isEmpty()
+                        && !name.contains(text, Qt::CaseInsensitive));
+    }
+
+    for (int i = 0 ; i < d->tagGrid->count() ; ++i)
+    {
+        QListWidgetItem* const item = d->tagGrid->item(i);
+        item->setHidden(!text.isEmpty()
+                        && !item->text().contains(text, Qt::CaseInsensitive));
     }
 
     if (d->mode == Mode::Import)
@@ -535,8 +653,7 @@ void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
 {
     const QString restoreId = currentSourceId();
 
-    d->sourceTable->setRowCount(0);
-    d->sourceTable->setHorizontalHeaderItem(0, new QTableWidgetItem(QStringLiteral("Tag")));
+    d->tagGrid->clear();
 
     QList<ImmichTag> sorted = tags;
     std::sort(sorted.begin(), sorted.end(),
@@ -545,12 +662,25 @@ void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
                   return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
               });
 
+    const QIcon tagIcon(QStringLiteral(":/dk-tag.svg"));
+
     for (const ImmichTag& tag : sorted)
     {
-        addSourceRow(tag.id, tag.name, QString(), QString(), QString());
+        auto* const item = new QListWidgetItem(tagIcon, tag.name, d->tagGrid);
+        item->setData(Qt::UserRole, tag.id);
+        item->setData(Qt::UserRole + 1, tag.name);
+        item->setTextAlignment(Qt::AlignHCenter);
     }
 
-    selectSource(restoreId);
+    for (int i = 0 ; i < d->tagGrid->count() ; ++i)
+    {
+        if (d->tagGrid->item(i)->data(Qt::UserRole).toString() == restoreId)
+        {
+            d->tagGrid->setCurrentItem(d->tagGrid->item(i));
+            break;
+        }
+    }
+
     applyFilter();
     d->status->setText(QStringLiteral("%1 tags").arg(tags.size()));
 }
@@ -602,8 +732,7 @@ void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
                                                             : currentSourceId();
     d->pendingSelectId.clear();
 
-    d->sourceTable->setRowCount(0);
-    d->sourceTable->setHorizontalHeaderItem(0, new QTableWidgetItem(QStringLiteral("Album")));
+    d->albumGrid->clear();
 
     QList<ImmichAlbum> sorted = albums;
     std::sort(sorted.begin(), sorted.end(),
@@ -614,7 +743,7 @@ void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
 
     for (const ImmichAlbum& album : sorted)
     {
-        addSourceRow(album.id, album.name,
+        addAlbumTile(album.id, album.name,
                      QStringLiteral("%L1").arg(album.assetCount),
                      dateRangeText(album.startDate, album.endDate),
                      album.thumbnailAssetId);
@@ -851,7 +980,7 @@ void ImmichWindow::slotDownloadAlbum()
     const QString startDir = d->session->downloadDir().isEmpty() ? QDir::homePath()
                                                                  : d->session->downloadDir();
     const QString dir = QFileDialog::getExistingDirectory(
-        this, QStringLiteral("Download album to"), startDir);
+        this, QStringLiteral("Download to"), startDir);
 
     if (dir.isEmpty())
     {
@@ -990,11 +1119,10 @@ void ImmichWindow::slotThumbnail(const QString& assetId, const QByteArray& bytes
             if (job.cover)
             {
                 d->coverCache.insert(job.key, pix);
-                const int row = findSourceRow(job.key);
 
-                if (row >= 0)
+                if (QListWidgetItem* const item = findAlbumItem(job.key))
                 {
-                    d->sourceTable->item(row, 0)->setIcon(QIcon(pix));
+                    setAlbumCover(item, pix);
                 }
             }
             else
@@ -1319,6 +1447,14 @@ void ImmichWindow::slotError(const QString& msg)
         d->status->setText(QStringLiteral("Duplicate check failed (%1); uploading everything.").arg(msg));
         nextUpload();
         return;
+    }
+
+    if (d->listingPurpose == Private::ListingPurpose::Preview)
+    {
+        // A failed preview must not wedge the listing machinery:
+        // startPreview refuses to run while a purpose is set, so
+        // leaving it here blocked every later selection.
+        d->listingPurpose = Private::ListingPurpose::None;
     }
 
     if (d->dlListing)

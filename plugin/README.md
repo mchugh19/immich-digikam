@@ -9,11 +9,12 @@ digiKam's own web-service plugins (Piwigo in particular).
 
 - Server URL and API key stored in digiKam's configuration
   (KConfig group "Immich Settings").
-- Sources are shown as a table in the shape of Immich's own
-  album view: cover thumbnail and name, item count, and the
-  date range of the album's oldest to newest photo. The list is
-  sorted by name and has a filter box; the selected album is
-  the upload target, shown in an "Upload target" label.
+- Sources are shown as tiles in the shape of Immich's own
+  views: an album tile is a large cover with the name under it
+  in a larger font, then the date range and the item count in
+  smaller type; a tag tile is the tag icon and its name. Tiles
+  are sorted by name and have a filter box; the selected album
+  is the upload target, shown in an "Upload target" label.
 - Import source switch (albums or tags): the import tool can
   pull an album or every asset carrying a tag. Selecting a
   source previews its contents as thumbnails (sortable by date
