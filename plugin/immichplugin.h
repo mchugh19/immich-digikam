@@ -52,11 +52,13 @@ public:
 
 private Q_SLOTS:
 
-    void slotImmich();
+    void slotExport();
+    void slotImport();
 
 private:
 
-    QPointer<ImmichWindow> m_toolDlg;
+    QPointer<ImmichWindow> m_toolDlgExport;
+    QPointer<ImmichWindow> m_toolDlgImport;
 };
 
 } // namespace DigikamGenericImmichPlugin

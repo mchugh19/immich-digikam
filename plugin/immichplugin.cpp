@@ -32,7 +32,8 @@ ImmichPlugin::ImmichPlugin(QObject* const parent)
 
 ImmichPlugin::~ImmichPlugin()
 {
-    delete m_toolDlg;
+    delete m_toolDlgExport;
+    delete m_toolDlgImport;
 }
 
 QString ImmichPlugin::name() const
@@ -54,7 +55,7 @@ QIcon ImmichPlugin::icon() const
 
 QString ImmichPlugin::description() const
 {
-    return i18n("A tool to sync albums with an Immich web-service");
+    return i18n("A tool to export and import items with an Immich web-service");
 }
 
 QString ImmichPlugin::details() const
@@ -76,26 +77,52 @@ QList<DPluginAuthor> ImmichPlugin::authors() const
 
 void ImmichPlugin::setup(QObject* const parent)
 {
-    DPluginAction* const ac = new DPluginAction(parent);
-    ac->setIcon(icon());
-    ac->setText(i18nc("@action", "Sync with &Immich..."));
-    ac->setObjectName(QLatin1String("sync_immich"));
-    ac->setActionCategory(DPluginAction::GenericExport);
+    // digiKam separates import and export tools: one plugin
+    // registers one action of each category, and each opens the
+    // shared dialog in its own mode. This is the arrangement the
+    // Google web-service plugin uses.
+    DPluginAction* const exportAction = new DPluginAction(parent);
+    exportAction->setIcon(icon());
+    exportAction->setText(i18nc("@action", "Export to &Immich..."));
+    exportAction->setObjectName(QLatin1String("export_immich"));
+    exportAction->setActionCategory(DPluginAction::GenericExport);
 
-    connect(ac, SIGNAL(triggered(bool)),
-            this, SLOT(slotImmich()));
+    connect(exportAction, SIGNAL(triggered(bool)),
+            this, SLOT(slotExport()));
 
-    addAction(ac);
+    addAction(exportAction);
+
+    DPluginAction* const importAction = new DPluginAction(parent);
+    importAction->setIcon(icon());
+    importAction->setText(i18nc("@action", "Import from &Immich..."));
+    importAction->setObjectName(QLatin1String("import_immich"));
+    importAction->setActionCategory(DPluginAction::GenericImport);
+
+    connect(importAction, SIGNAL(triggered(bool)),
+            this, SLOT(slotImport()));
+
+    addAction(importAction);
 }
 
-void ImmichPlugin::slotImmich()
+void ImmichPlugin::slotExport()
 {
-    if (!reactivateToolDialog(m_toolDlg))
+    if (!reactivateToolDialog(m_toolDlgExport))
     {
-        delete m_toolDlg;
-        m_toolDlg = new ImmichWindow(infoIface(sender()), nullptr);
-        m_toolDlg->setPlugin(this);
-        m_toolDlg->show();
+        delete m_toolDlgExport;
+        m_toolDlgExport = new ImmichWindow(infoIface(sender()), ImmichWindow::Mode::Export, nullptr);
+        m_toolDlgExport->setPlugin(this);
+        m_toolDlgExport->show();
+    }
+}
+
+void ImmichPlugin::slotImport()
+{
+    if (!reactivateToolDialog(m_toolDlgImport))
+    {
+        delete m_toolDlgImport;
+        m_toolDlgImport = new ImmichWindow(infoIface(sender()), ImmichWindow::Mode::Import, nullptr);
+        m_toolDlgImport->setPlugin(this);
+        m_toolDlgImport->show();
     }
 }
 

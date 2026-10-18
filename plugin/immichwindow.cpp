@@ -56,6 +56,7 @@ public:
     DInfoInterface* iface   = nullptr;
     ImmichSession*  session = nullptr;
     ImmichTalker*   talker  = nullptr;
+    Mode            mode    = Mode::Export;
 
     QLineEdit*    urlEdit     = nullptr;
     QLineEdit*    keyEdit     = nullptr;
@@ -96,16 +97,18 @@ public:
     bool         dlListing     = false;
 };
 
-ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
+ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* const parent)
     : QDialog(parent),
       d(new Private)
 {
     d->iface   = iface;
+    d->mode    = mode;
     d->session = new ImmichSession;
     d->session->load();
     d->talker  = new ImmichTalker(d->session, this);
 
-    setWindowTitle(QStringLiteral("Immich"));
+    setWindowTitle(d->mode == Mode::Export ? QStringLiteral("Export to Immich")
+                                           : QStringLiteral("Import from Immich"));
 
     auto* const form = new QFormLayout;
     d->urlEdit = new QLineEdit(d->session->url());
@@ -127,6 +130,11 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
     d->progress         = new QProgressBar;
     d->progress->setVisible(false);
     d->status           = new QLabel;
+
+    // Each tool shows only its own direction's actions.
+    d->targetLabel->setVisible(d->mode == Mode::Export);
+    d->uploadBtn->setVisible(d->mode == Mode::Export);
+    d->downloadBtn->setVisible(d->mode == Mode::Import);
 
     auto* const layout = new QVBoxLayout(this);
     layout->addLayout(form);

@@ -58,7 +58,18 @@ class ImmichWindow : public QDialog
 
 public:
 
-    explicit ImmichWindow(DInfoInterface* const iface, QWidget* const parent = nullptr);
+    /** Which tool this dialog serves. digiKam separates import and
+     * export tools; the dialog is shared and shows only its own
+     * direction's actions.
+     */
+    enum class Mode
+    {
+        Export,
+        Import
+    };
+
+    explicit ImmichWindow(DInfoInterface* const iface, Mode mode,
+                          QWidget* const parent = nullptr);
     ~ImmichWindow() override;
 
     void setPlugin(DPlugin* const plugin);

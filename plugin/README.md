@@ -66,5 +66,6 @@ DK_PLUGIN_PATH="$PWD/build;/usr/lib64/qt6/plugins/digikam" digikam
 ```
 
 Then: Plugins settings should list Immich, the Export menu gains
-"Sync with Immich...", and the window's Refresh albums should
-list the server's albums.
+"Export to Immich..." and the Import menu gains "Import from
+Immich...". Each opens the shared window in its own mode, and
+Refresh albums should list the server's albums.
