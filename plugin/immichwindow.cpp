@@ -29,6 +29,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QInputDialog>
+#include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -43,6 +44,7 @@
 #include "dmetadata.h"
 #include "immichsession.h"
 #include "immichtalker.h"
+#include "immichxmp.h"
 
 namespace DigikamGenericImmichPlugin
 {
@@ -156,6 +158,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
     connect(d->talker, &ImmichTalker::signalAlbums, this, &ImmichWindow::slotAlbums);
     connect(d->talker, &ImmichTalker::signalAlbumAssets, this, &ImmichWindow::slotAlbumAssets);
     connect(d->talker, &ImmichTalker::signalDownloadFinished, this, &ImmichWindow::slotDownloadFinished);
+    connect(d->talker, &ImmichTalker::signalAssetRecord, this, &ImmichWindow::slotAssetRecord);
     connect(d->talker, &ImmichTalker::signalAlbumUpdated, this, &ImmichWindow::slotAlbumUpdated);
     connect(d->talker, &ImmichTalker::signalUploadSucceeded, this, &ImmichWindow::slotUploadSucceeded);
     connect(d->talker, &ImmichTalker::signalUploadCheck, this, &ImmichWindow::slotUploadCheck);
@@ -596,6 +599,61 @@ void ImmichWindow::nextDownload()
     d->talker->downloadAsset(asset.id, d->dlDir + QLatin1Char('/') + asset.fileName);
 }
 
+void ImmichWindow::slotAssetRecord(const QString& assetId, const QString& targetFile,
+                                   const QJsonObject& record)
+{
+    // The server holds no sidecar file for this asset: generate one
+    // from the Immich record so digiKam imports the tags, rating,
+    // caption and GPS together with the photo. Tag names live in the
+    // record's tags array ("value" in current servers, "name" in
+    // older ones); rating and friends live in exifInfo.
+    const QJsonObject exif = record.value(QStringLiteral("exifInfo")).toObject();
+
+    QStringList tags;
+
+    for (const QJsonValue& value : record.value(QStringLiteral("tags")).toArray())
+    {
+        const QJsonObject tag = value.toObject();
+        QString           name = tag.value(QStringLiteral("value")).toString();
+
+        if (name.isEmpty())
+        {
+            name = tag.value(QStringLiteral("name")).toString();
+        }
+
+        if (!name.isEmpty() && !tags.contains(name))
+        {
+            tags << name;
+        }
+    }
+
+    int rating = exif.value(QStringLiteral("rating")).toInt();
+
+    if (rating == 0)
+    {
+        rating = record.value(QStringLiteral("rating")).toInt();
+    }
+
+    const QString    description = exif.value(QStringLiteral("description")).toString();
+    const QJsonValue lat         = exif.value(QStringLiteral("latitude"));
+    const QJsonValue lon         = exif.value(QStringLiteral("longitude"));
+    const bool       hasGps      = lat.isDouble() && lon.isDouble();
+
+    if (!tags.isEmpty() || rating != 0 || !description.isEmpty() || hasGps)
+    {
+        const QString packet = buildSidecarPacket(tags, rating, description, hasGps,
+                                                  lat.toDouble(), lon.toDouble());
+        QFile         file(targetFile + QStringLiteral(".xmp"));
+
+        if (file.open(QIODevice::WriteOnly))
+        {
+            file.write(packet.toUtf8());
+        }
+    }
+
+    slotDownloadFinished(assetId, true);
+}
+
 void ImmichWindow::slotDownloadFinished(const QString& /*assetId*/, bool ok)
 {
     if (d->cancelling)
@@ -753,58 +811,10 @@ QString ImmichWindow::sidecarFor(const QUrl& url, const QString& filePath)
 
         if (!tags.isEmpty() || rating > 0 || !comment.isEmpty() || hasGps)
         {
-            QString elems;
-
-            if (!comment.isEmpty())
-            {
-                elems += QStringLiteral("\n   <dc:description><rdf:Alt><rdf:li xml:lang=\"x-default\">%1</rdf:li></rdf:Alt></dc:description>")
-                             .arg(comment.toHtmlEscaped());
-            }
-
-            if (rating > 0)
-            {
-                elems += QStringLiteral("\n   <xmp:Rating>%1</xmp:Rating>").arg(rating);
-            }
-
-            if (!tags.isEmpty())
-            {
-                elems += QStringLiteral("\n   <digiKam:TagsList><rdf:Bag>");
-
-                for (const QString& tag : tags)
-                {
-                    elems += QStringLiteral("\n      <rdf:li>%1</rdf:li>").arg(tag.toHtmlEscaped());
-                }
-
-                elems += QStringLiteral("\n   </rdf:Bag></digiKam:TagsList>");
-            }
-
-            if (hasGps)
-            {
-                auto gpsCoord = [](double value, bool isLatitude)
-                {
-                    const double absolute = std::fabs(value);
-                    const int    degrees  = int(absolute);
-                    const double minutes  = (absolute - degrees) * 60.0;
-                    const QChar  hemi     = isLatitude ? (value >= 0 ? QLatin1Char('N') : QLatin1Char('S'))
-                                                       : (value >= 0 ? QLatin1Char('E') : QLatin1Char('W'));
-                    return QStringLiteral("%1,%2%3").arg(degrees).arg(minutes, 0, 'f', 4).arg(hemi);
-                };
-
-                elems += QStringLiteral("\n   <exif:GPSLatitude>%1</exif:GPSLatitude>").arg(gpsCoord(item.latitude(), true));
-                elems += QStringLiteral("\n   <exif:GPSLongitude>%1</exif:GPSLongitude>").arg(gpsCoord(item.longitude(), false));
-            }
-
-            const QString xmp = QStringLiteral(
-                "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n"
-                " <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
-                "  <rdf:Description rdf:about=\"\"\n"
-                "    xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n"
-                "    xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n"
-                "    xmlns:exif=\"http://ns.adobe.com/exif/1.0/\"\n"
-                "    xmlns:digiKam=\"http://www.digikam.org/ns/1.0/\">%1\n"
-                "  </rdf:Description>\n"
-                " </rdf:RDF>\n"
-                "</x:xmpmeta>\n").arg(elems);
+            const QString xmp = buildSidecarPacket(tags, rating, comment,
+                                                   hasGps,
+                                                   hasGps ? item.latitude() : 0.0,
+                                                   hasGps ? item.longitude() : 0.0);
 
             QFile file(tempPath);
 

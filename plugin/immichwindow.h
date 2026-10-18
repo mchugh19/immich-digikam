@@ -20,6 +20,7 @@
 // Qt includes
 
 #include <QDialog>
+#include <QJsonObject>
 
 // Local includes
 
@@ -76,6 +77,8 @@ private Q_SLOTS:
     void slotDownloadAlbum();
     void slotAlbumAssets(const QList<ImmichAssetRef>& assets);
     void slotDownloadFinished(const QString& assetId, bool ok);
+    void slotAssetRecord(const QString& assetId, const QString& targetFile,
+                         const QJsonObject& record);
     void slotCancelTransfer();
     void slotError(const QString& msg);
     void slotBusy(bool val);

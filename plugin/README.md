@@ -17,7 +17,10 @@ digiKam's own web-service plugins (Piwigo in particular).
   rating, caption, GPS), or the file's embedded XMP packet.
 - Download: the selected album's originals and sidecars are
   written into a chosen folder; files already on disk are
-  skipped.
+  skipped. When the server holds no sidecar file for an asset,
+  one is generated from the Immich asset record (tags, rating,
+  caption, GPS), so the metadata arrives with the photo and
+  digiKam imports it on scan.
 - Both transfers run item by item with a progress bar and a
   summary (done / skipped / failed counts).
 

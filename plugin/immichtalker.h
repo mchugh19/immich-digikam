@@ -15,6 +15,7 @@
 
 // Qt includes
 
+#include <QJsonObject>
 #include <QNetworkRequest>
 #include <QObject>
 
@@ -77,7 +78,9 @@ public:
 
     /**
      * Download one asset's original to targetPath, followed by its
-     * sidecar to targetPath + ".xmp" when the server has one.
+     * sidecar to targetPath + ".xmp" when the server has one. When
+     * the server has none, the asset record is fetched instead and
+     * emitted as signalAssetRecord for sidecar generation.
      * Emits signalDownloadFinished either way; the download only
      * fails when the original itself cannot be fetched or written.
      */
@@ -103,6 +106,13 @@ Q_SIGNALS:
     void signalUploadSucceeded(const QString& assetId, const QString& status);
     void signalAlbumAssets(const QList<ImmichAssetRef>& assets);
     void signalDownloadFinished(const QString& assetId, bool ok);
+    /** The asset downloaded but the server holds no sidecar file
+     * for it: the full asset record, so the window can generate a
+     * sidecar from the Immich metadata. The window completes the
+     * item itself after writing it.
+     */
+    void signalAssetRecord(const QString& assetId, const QString& targetFile,
+                           const QJsonObject& record);
     void signalUploadCheck(const QMap<QString, QString>& duplicatesByPath);
 
 private Q_SLOTS:

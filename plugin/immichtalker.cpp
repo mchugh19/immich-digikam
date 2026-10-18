@@ -42,7 +42,8 @@ public:
 
     // What a pending reply should be parsed as when it finishes.
     enum class Op { None, ListAlbums, CreateAlbum, AddToAlbum, Upload,
-                    AlbumAssets, DownloadOriginal, DownloadSidecar, BulkCheck };
+                    AlbumAssets, DownloadOriginal, DownloadSidecar,
+                    DownloadRecord, BulkCheck };
     QHash<QNetworkReply*, Op> ops;
 
     // Download context per reply: asset id and destination path.
@@ -281,16 +282,33 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         {
             // The original is already on disk; a missing (404) or
             // unfetchable sidecar does not fail the download.
+            bool sidecarWritten = false;
+
             if (!failed && httpStatus == 200 && !body.isEmpty())
             {
                 QFile file(targetPath);
+
                 if (file.open(QIODevice::WriteOnly))
                 {
-                    file.write(body);
+                    sidecarWritten = (file.write(body) == body.size());
                 }
             }
 
-            Q_EMIT signalDownloadFinished(assetId, true);
+            if (sidecarWritten)
+            {
+                Q_EMIT signalDownloadFinished(assetId, true);
+                return;
+            }
+
+            // No server sidecar: fetch the asset record so the window
+            // can generate a sidecar from the Immich metadata (the
+            // tags above all) instead of the photo arriving bare.
+            const QString originalPath = targetPath.left(targetPath.size() - 4);   // strip ".xmp"
+            QNetworkReply* const recordReply = d->net->get(
+                makeRequest(QStringLiteral("/assets/%1").arg(assetId)));
+            d->ops.insert(recordReply, Private::Op::DownloadRecord);
+            d->downloadCtx.insert(recordReply, qMakePair(assetId, originalPath));
+            Q_EMIT signalBusy(true);
             return;
         }
 
@@ -321,6 +339,28 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         d->ops.insert(sidecarReply, Private::Op::DownloadSidecar);
         d->downloadCtx.insert(sidecarReply, qMakePair(assetId, targetPath + QStringLiteral(".xmp")));
         Q_EMIT signalBusy(true);
+        return;
+    }
+
+    if (op == Private::Op::DownloadRecord)
+    {
+        // A record that cannot be fetched still leaves a good
+        // download behind: finish without a generated sidecar rather
+        // than raising an error.
+        const QJsonObject record = (reply->error() == QNetworkReply::NoError)
+                                       ? QJsonDocument::fromJson(reply->readAll()).object()
+                                       : QJsonObject();
+        reply->deleteLater();
+
+        if (!record.isEmpty())
+        {
+            Q_EMIT signalAssetRecord(ctx.first, ctx.second, record);
+        }
+        else
+        {
+            Q_EMIT signalDownloadFinished(ctx.first, true);
+        }
+
         return;
     }
 
