@@ -1918,9 +1918,9 @@ void ImmichWindow::printUploadSummary()
 
     if (d->matchedSync > 0)
     {
-        text += QStringLiteral(" %1 item(s) matched photos already in Immich;"
-                               " their metadata was synced instead of re-uploading.")
-                    .arg(d->matchedSync);
+        text += QStringLiteral(" %1 photo%2 synced metadata.")
+                    .arg(d->matchedSync)
+                    .arg(d->matchedSync == 1 ? QString() : QStringLiteral("s"));
 
         if (d->matchedMulti > 0)
         {
