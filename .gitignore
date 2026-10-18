@@ -1,0 +1,5 @@
+# Build output and generated test material
+build/
+test-run/
+__pycache__/
+*.pyc
