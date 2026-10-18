@@ -37,7 +37,7 @@ digiKam's own web-service plugins (Piwigo in particular).
   across sessions, pruned oldest-first past roughly 200 MB.
   Contents listings are cached for the session; Refresh is
   the invalidation, and an upload drops its target album's
-  cached listing.
+  cached listing only when the album actually gained assets.
 
 ## Server and API key
 
