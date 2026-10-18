@@ -50,10 +50,16 @@ public:
      */
     QString replaceMode() const;
 
+    /** Export destination choice: "library" (no album) or
+     * "album" (the album picked in the export window).
+     */
+    QString exportTargetMode() const;
+
     void setUrl(const QString& url);
     void setApiKey(const QString& apiKey);
     void setDownloadDir(const QString& dir);
     void setReplaceMode(const QString& mode);
+    void setExportTargetMode(const QString& mode);
 
     void save();
     void load();

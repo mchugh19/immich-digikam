@@ -30,6 +30,7 @@ public:
     QString apiKey;
     QString downloadDir;
     QString replaceMode = QStringLiteral("stack");
+    QString exportTargetMode = QStringLiteral("library");
 };
 
 ImmichSession::ImmichSession()
@@ -62,6 +63,11 @@ QString ImmichSession::replaceMode() const
     return d->replaceMode;
 }
 
+QString ImmichSession::exportTargetMode() const
+{
+    return d->exportTargetMode;
+}
+
 void ImmichSession::setUrl(const QString& url)
 {
     d->url = url;
@@ -82,6 +88,11 @@ void ImmichSession::setReplaceMode(const QString& mode)
     d->replaceMode = (mode == QStringLiteral("trash")) ? mode : QStringLiteral("stack");
 }
 
+void ImmichSession::setExportTargetMode(const QString& mode)
+{
+    d->exportTargetMode = (mode == QStringLiteral("album")) ? mode : QStringLiteral("library");
+}
+
 void ImmichSession::save()
 {
     KConfigGroup group = KSharedConfig::openConfig()->group(QStringLiteral("Immich Settings"));
@@ -89,6 +100,7 @@ void ImmichSession::save()
     group.writeEntry("ApiKey", d->apiKey);
     group.writeEntry("DownloadDir", d->downloadDir);
     group.writeEntry("ReplaceMode", d->replaceMode);
+    group.writeEntry("ExportTargetMode", d->exportTargetMode);
     group.sync();
 }
 
@@ -99,6 +111,7 @@ void ImmichSession::load()
     d->apiKey      = group.readEntry("ApiKey", QString());
     d->downloadDir = group.readEntry("DownloadDir", QString());
     setReplaceMode(group.readEntry("ReplaceMode", QStringLiteral("stack")));
+    setExportTargetMode(group.readEntry("ExportTargetMode", QStringLiteral("library")));
 }
 
 } // namespace DigikamGenericImmichPlugin

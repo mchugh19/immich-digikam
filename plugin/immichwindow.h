@@ -149,6 +149,8 @@ private:
     void updateExportStatus();
     void nextUpload();
     void finishUpload();
+    void applyTargetMode();
+    void updateTargetLabel();
     void printUploadSummary();
     void maybeStartSync();
     void pumpSyncFetches();

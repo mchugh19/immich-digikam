@@ -13,8 +13,15 @@ digiKam's own web-service plugins (Piwigo in particular).
   views: an album tile is a large cover with the name under it
   in a larger font, then the date range and the item count in
   smaller type; a tag tile is the tag icon and its name. Tiles
-  are sorted by name and have a filter box; the selected album
-  is the upload target, shown in an "Upload target" label.
+  are sorted by name and have a filter box.
+- Export destination: an "Upload to" radio choice between
+  "Library only" (the default; uploads go to the Immich library
+  with no album) and "Album" (the selected album tile is the
+  target). The album picker is disabled, not hidden, while
+  "Library only" is chosen, and the choice is remembered.
+  Everything else about an export (dedupe, metadata sync,
+  identity matching, replace handling) works the same either
+  way; only the album assignment step is skipped.
 - Import source switch (albums or tags): the import tool can
   pull an album or every asset carrying a tag. Selecting a
   source previews its contents as thumbnails (sortable by date

@@ -200,6 +200,8 @@ public:
     int          overwriteCount = 0;
     bool         replaceByStack = true;
     QComboBox*   replaceCombo = nullptr;
+    QRadioButton* libraryRadio = nullptr;
+    QRadioButton* albumRadio   = nullptr;
     bool         restoring = false;
     QString      currentUploadPath;
 
@@ -447,6 +449,10 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
                                QStringLiteral("Date (newest first)"),
                                QStringLiteral("Name") });
     d->targetLabel      = new QLabel(QStringLiteral("Upload target: no album (library only)"));
+    d->libraryRadio     = new QRadioButton(QStringLiteral("Library only"));
+    d->albumRadio       = new QRadioButton(QStringLiteral("Album"));
+    d->albumRadio->setChecked(d->session->exportTargetMode() == QStringLiteral("album"));
+    d->libraryRadio->setChecked(!d->albumRadio->isChecked());
     d->progress         = new QProgressBar;
     d->progress->setVisible(false);
     d->status           = new QLabel;
@@ -489,15 +495,38 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     separator->setFrameShadow(QFrame::Sunken);
     layout->addWidget(separator);
 
-    layout->addWidget(d->filterEdit);
-
-    if (d->mode == Mode::Import)
+    if (d->mode == Mode::Export)
     {
-        layout->addLayout(sourceRow);
-    }
+        // Destination choice, shaped by the KDE HIG: the choice
+        // is mutually exclusive, so it is a radio group with a
+        // caption; the album picker is subordinate to the Album
+        // radio (indented beneath it) and is disabled, not
+        // hidden, while Library only is chosen.
+        auto* const targetGroup = new QVBoxLayout;
+        targetGroup->addWidget(new QLabel(QStringLiteral("Upload to")));
 
-    layout->addWidget(d->albumGrid, 2);
-    layout->addWidget(d->tagGrid, 2);
+        auto* const targetRadios = new QVBoxLayout;
+        targetRadios->setContentsMargins(24, 0, 0, 0);
+        targetRadios->addWidget(d->libraryRadio);
+        targetRadios->addWidget(d->albumRadio);
+        targetGroup->addLayout(targetRadios);
+        layout->addLayout(targetGroup);
+
+        auto* const pickerBox = new QWidget;
+        auto* const pickerLayout = new QVBoxLayout(pickerBox);
+        pickerLayout->setContentsMargins(48, 0, 0, 0);
+        pickerLayout->addWidget(d->filterEdit);
+        pickerLayout->addWidget(d->albumGrid, 2);
+        layout->addWidget(pickerBox, 2);
+        layout->addWidget(d->tagGrid, 2);
+    }
+    else
+    {
+        layout->addWidget(d->filterEdit);
+        layout->addLayout(sourceRow);
+        layout->addWidget(d->albumGrid, 2);
+        layout->addWidget(d->tagGrid, 2);
+    }
 
     if (d->mode == Mode::Import)
     {
@@ -524,12 +553,33 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     connect(d->newAlbumBtn, &QPushButton::clicked, this, &ImmichWindow::slotNewAlbum);
     connect(d->talker, &ImmichTalker::signalAlbumCreated, this, &ImmichWindow::slotAlbumCreated);
     connect(d->uploadBtn, &QPushButton::clicked, this, &ImmichWindow::slotUploadSelection);
+    connect(d->albumRadio, &QRadioButton::toggled, this,
+            [this](bool on)
+            {
+                if (on)
+                {
+                    d->session->setExportTargetMode(QStringLiteral("album"));
+                    d->session->save();
+                }
+
+                applyTargetMode();
+            });
+    connect(d->libraryRadio, &QRadioButton::toggled, this,
+            [this](bool on)
+            {
+                if (on)
+                {
+                    d->session->setExportTargetMode(QStringLiteral("library"));
+                    d->session->save();
+                }
+
+                applyTargetMode();
+            });
+    applyTargetMode();
     connect(d->albumGrid, &QListWidget::currentItemChanged, this,
             [this](QListWidgetItem* item)
             {
-                d->targetLabel->setText(item
-                    ? QStringLiteral("Upload target: %1").arg(item->data(Qt::UserRole + 1).toString())
-                    : QStringLiteral("Upload target: no album (library only)"));
+                updateTargetLabel();
                 refreshTileStyles();
                 updateExportStatus();
 
@@ -714,6 +764,13 @@ QListWidgetItem* ImmichWindow::findAlbumItem(const QString& id) const
 
 QString ImmichWindow::currentSourceId() const
 {
+    // In the export tool, "Library only" is an explicit choice,
+    // not just the absence of a selection.
+    if (d->mode == Mode::Export && d->libraryRadio && !d->albumRadio->isChecked())
+    {
+        return QString();
+    }
+
     QListWidgetItem* const item = d->sourceIsTags ? d->tagGrid->currentItem()
                                                   : d->albumGrid->currentItem();
     return item ? item->data(Qt::UserRole).toString() : QString();
@@ -721,9 +778,42 @@ QString ImmichWindow::currentSourceId() const
 
 QString ImmichWindow::currentSourceName() const
 {
+    if (d->mode == Mode::Export && d->libraryRadio && !d->albumRadio->isChecked())
+    {
+        return QString();
+    }
+
     QListWidgetItem* const item = d->sourceIsTags ? d->tagGrid->currentItem()
                                                   : d->albumGrid->currentItem();
     return item ? item->data(Qt::UserRole + 1).toString() : QString();
+}
+
+void ImmichWindow::applyTargetMode()
+{
+    if (d->mode != Mode::Export)
+    {
+        return;
+    }
+
+    const bool album = d->albumRadio->isChecked();
+    d->filterEdit->setEnabled(album);
+    d->albumGrid->setEnabled(album);
+    d->newAlbumBtn->setEnabled(album);
+    updateTargetLabel();
+    updateExportStatus();
+}
+
+void ImmichWindow::updateTargetLabel()
+{
+    if (d->mode != Mode::Export)
+    {
+        return;
+    }
+
+    const QString name = currentSourceName();
+    d->targetLabel->setText(name.isEmpty()
+                                ? QStringLiteral("Upload target: no album (library only)")
+                                : QStringLiteral("Upload target: %1").arg(name));
 }
 
 void ImmichWindow::setAlbumCover(QListWidgetItem* item, const QPixmap& pix)
