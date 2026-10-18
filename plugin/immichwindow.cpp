@@ -1075,11 +1075,20 @@ void ImmichWindow::fillPreview()
             break;
     }
 
+    // Items start with a full-size transparent placeholder icon:
+    // an item created icon-less gets a text-only geometry, and
+    // the thumbnail arriving later is then painted squashed into
+    // that short box instead of the 96x96 the view advertises.
+    QPixmap blank(96, 96);
+    blank.fill(Qt::transparent);
+    const QIcon placeholder(blank);
+
     for (const ImmichAssetRef& asset : sorted)
     {
         auto* const item = new QListWidgetItem(asset.fileName, d->previewList);
         item->setData(Qt::UserRole, asset.id);
         item->setToolTip(asset.fileCreatedAt.left(10));
+        item->setSizeHint(QSize(116, 128));
 
         const auto cached = d->thumbCache.constFind(asset.id);
 
@@ -1089,6 +1098,7 @@ void ImmichWindow::fillPreview()
         }
         else
         {
+            item->setIcon(placeholder);
             queueThumb(false, asset.id, asset.id);
         }
     }
@@ -1163,6 +1173,15 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
             startPreview(currentId);
         }
 
+        return;
+    }
+
+    if (d->listingPurpose != Private::ListingPurpose::Download)
+    {
+        // A listing nobody is waiting for (superseded, or its
+        // purpose was cleared by an error): drop it. Falling
+        // through here would treat a preview result as a download
+        // and start writing files.
         return;
     }
 
