@@ -45,7 +45,8 @@ public:
                     AlbumAssets, DownloadOriginal, DownloadSidecar,
                     DownloadRecord, MetaSidecar, MetaRecord,
                     BulkCheck, Thumbnail,
-                    SyncRecord, PatchAsset, CreateTag, BulkTagAssets };
+                    SyncRecord, PatchAsset, CreateTag, BulkTagAssets,
+                    SearchByName, AlbumsForAsset, DeleteAssets };
     QHash<QNetworkReply*, Op> ops;
     // Sync context per reply: the asset id (or tag name / id).
     QHash<QNetworkReply*, QString> syncCtx;
@@ -344,6 +345,47 @@ void ImmichTalker::createTag(const QString& name)
     Q_EMIT signalBusy(true);
 }
 
+void ImmichTalker::searchByFileName(const QString& name)
+{
+    const QJsonObject obj {
+        { QStringLiteral("originalFileName"), name },
+        { QStringLiteral("size"),             250  }
+    };
+    QNetworkRequest req = makeRequest(QStringLiteral("/search/metadata"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
+    d->ops.insert(reply, Private::Op::SearchByName);
+    d->syncCtx.insert(reply, name);
+    Q_EMIT signalBusy(true);
+}
+
+void ImmichTalker::listAlbumsForAsset(const QString& assetId)
+{
+    QNetworkReply* const reply = d->net->get(
+        makeRequest(QStringLiteral("/albums?assetId=%1").arg(assetId)));
+    d->ops.insert(reply, Private::Op::AlbumsForAsset);
+    d->syncCtx.insert(reply, assetId);
+    Q_EMIT signalBusy(true);
+}
+
+void ImmichTalker::deleteAssets(const QStringList& assetIds)
+{
+    QJsonArray ids;
+
+    for (const QString& id : assetIds)
+    {
+        ids.append(id);
+    }
+
+    const QJsonObject obj { { QStringLiteral("ids"), ids } };
+    QNetworkRequest req = makeRequest(QStringLiteral("/assets"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply* const reply = d->net->sendCustomRequest(req, QByteArrayLiteral("DELETE"),
+                                                            QJsonDocument(obj).toJson());
+    d->ops.insert(reply, Private::Op::DeleteAssets);
+    Q_EMIT signalBusy(true);
+}
+
 void ImmichTalker::bulkTagAssets(const QString& tagId, const QStringList& assetIds)
 {
     QJsonArray ids;
@@ -531,6 +573,41 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
                                                                             : QByteArray();
         reply->deleteLater();
         Q_EMIT signalThumbnail(assetId, bytes);
+        return;
+    }
+
+    if (op == Private::Op::SearchByName)
+    {
+        const QString     ctx   = d->syncCtx.take(reply);
+        const QJsonObject doc   = QJsonDocument::fromJson(reply->readAll()).object();
+        const QJsonArray  items = doc.value(QStringLiteral("assets"))
+                                     .toObject().value(QStringLiteral("items")).toArray();
+        reply->deleteLater();
+        Q_EMIT signalIdentitySearch(ctx, items);
+        return;
+    }
+
+    if (op == Private::Op::AlbumsForAsset)
+    {
+        const QString    ctx = d->syncCtx.take(reply);
+        const QJsonArray arr = QJsonDocument::fromJson(reply->readAll()).array();
+        QStringList      albumIds;
+
+        for (const QJsonValue& v : arr)
+        {
+            albumIds.append(v.toObject().value(QStringLiteral("id")).toString());
+        }
+
+        reply->deleteLater();
+        Q_EMIT signalAlbumsForAsset(ctx, albumIds);
+        return;
+    }
+
+    if (op == Private::Op::DeleteAssets)
+    {
+        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        reply->deleteLater();
+        Q_EMIT signalAssetsDeleted(httpStatus);
         return;
     }
 

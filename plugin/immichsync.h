@@ -6,6 +6,7 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QFile>
+#include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -273,6 +274,141 @@ struct SyncSnapshot
         return s;
     }
 };
+
+// --- identity matching -----------------------------------------------
+//
+// Immich identifies an asset by content checksum only, so a file
+// whose bytes changed (digiKam writing metadata into it, say)
+// uploads as a brand new photo. The export therefore gives a
+// checksum-missed file a second chance to be recognised: same
+// file name, same capture time and same dimensions on the server
+// means it is very likely the same photo, and a pixel comparison
+// against the server's thumbnail then separates a metadata-only
+// change (sync the metadata, upload nothing) from a real edit
+// (upload and replace). The replace decision additionally
+// requires the capture times to match exactly ("strict"): with
+// no reliable time evidence the file uploads as new instead, so
+// a stranger's photo is never overwritten on a name collision.
+
+struct IdentityCandidate
+{
+    QString id;
+    QString name;
+    QString localDateTime;   // server wall-clock capture time
+    QString createdAt;       // server ingest time (newest wins)
+    int     width  = 0;
+    int     height = 0;
+};
+
+struct IdentityMatch
+{
+    QString assetId;
+    int     candidates  = 0;   // name+dimension matches found
+    bool    strictTime  = false;
+};
+
+inline IdentityMatch chooseIdentityMatch(const QList<IdentityCandidate>& candidates,
+                                         const QString& fileName,
+                                         const QString& dateStr,
+                                         int width, int height)
+{
+    IdentityMatch result;
+    QList<IdentityCandidate> pool;
+
+    for (const IdentityCandidate& c : candidates)
+    {
+        if (c.name != fileName)
+        {
+            continue;
+        }
+
+        const bool dims = (c.width == width && c.height == height)
+                       || (c.width == height && c.height == width);
+
+        if (dims)
+        {
+            pool.append(c);
+        }
+    }
+
+    result.candidates = pool.size();
+
+    if (pool.isEmpty())
+    {
+        return result;
+    }
+
+    QList<IdentityCandidate> timed;
+
+    for (const IdentityCandidate& c : pool)
+    {
+        if (!dateStr.isEmpty() && c.localDateTime.left(19) == dateStr)
+        {
+            timed.append(c);
+        }
+    }
+
+    if (!timed.isEmpty())
+    {
+        result.strictTime = true;
+        pool = timed;
+    }
+
+    const IdentityCandidate* best = &pool.constFirst();
+
+    for (const IdentityCandidate& c : pool)
+    {
+        if (c.createdAt > best->createdAt)
+        {
+            best = &c;
+        }
+    }
+
+    result.assetId = best->id;
+    return result;
+}
+
+// Mean absolute per-channel difference between two images at a
+// common 16x16 grayscale-ish scale, 0..255; -1 when either side
+// is missing. A server thumbnail is a lossy re-encode of the same
+// pixels, so identical pictures score in the low single digits
+// while any visible edit (a colour grade moves whole regions)
+// scores far higher.
+inline double imageDifference(const QImage& a, const QImage& b)
+{
+    if (a.isNull() || b.isNull())
+    {
+        return -1.0;
+    }
+
+    const QSize size(16, 16);
+    const QImage x = a.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                      .convertToFormat(QImage::Format_RGB32);
+    const QImage y = b.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                      .convertToFormat(QImage::Format_RGB32);
+    double sum = 0.0;
+
+    for (int row = 0 ; row < size.height() ; ++row)
+    {
+        const QRgb* const xr = reinterpret_cast<const QRgb*>(x.constScanLine(row));
+        const QRgb* const yr = reinterpret_cast<const QRgb*>(y.constScanLine(row));
+
+        for (int col = 0 ; col < size.width() ; ++col)
+        {
+            sum += qAbs(qRed(xr[col])   - qRed(yr[col]))
+                 + qAbs(qGreen(xr[col]) - qGreen(yr[col]))
+                 + qAbs(qBlue(xr[col])  - qBlue(yr[col]));
+        }
+    }
+
+    return sum / (size.width() * size.height() * 3.0);
+}
+
+inline bool imagesLookSame(const QImage& a, const QImage& b)
+{
+    const double diff = imageDifference(a, b);
+    return diff >= 0.0 && diff <= 10.0;
+}
 
 inline QJsonObject loadSyncState(const QString& path)
 {

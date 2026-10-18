@@ -36,6 +36,22 @@ digiKam's own web-service plugins (Piwigo in particular).
   sidecar, or one generated from the Immich asset record:
   tags, rating, caption, GPS), so metadata changes made in
   Immich still reach digiKam on a re-download.
+- No duplicates for edited files: Immich identifies a
+  photo by content checksum, so a file whose bytes changed
+  (digiKam writes metadata into files, or the photo was
+  edited) would normally upload as a second copy. Before
+  uploading such a file, the plugin looks for the same photo
+  on the server by file name, capture time and dimensions,
+  and compares the pixels with the server's thumbnail. A
+  metadata-only change uploads nothing: the metadata sync
+  below updates the existing asset. A real edit (changed
+  pixels, same capture time) uploads the new version, puts
+  it in every album the old copy belonged to, syncs its
+  metadata, and moves the old copy to Immich's trash
+  (recoverable for 30 days). When the evidence is ambiguous
+  (no matching capture time, several candidates), nothing
+  is overwritten: the file uploads as new, or syncs to the
+  newest matching copy.
 - Metadata sync on export: a selected file the server
   already has (checksum match) is not re-uploaded, but its
   digiKam tags, rating, caption and GPS are diffed against
@@ -67,7 +83,9 @@ Tested against Immich 3.3.3. The API key needs these permissions:
 The export metadata sync additionally needs `asset.update`,
 `tag.create` and `tag.asset`; without them the sync is refused
 by the server and the run's summary says so (uploads and
-downloads are unaffected).
+downloads are unaffected). Replacing an edited photo's old
+copy additionally needs `asset.delete` (the old copy goes to
+Immich's trash, it is not permanently deleted).
 
 ## Build
 

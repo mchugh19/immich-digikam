@@ -15,6 +15,7 @@
 
 // Qt includes
 
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QNetworkRequest>
 #include <QObject>
@@ -143,6 +144,22 @@ public:
      */
     void bulkTagAssets(const QString& tagId, const QStringList& assetIds);
 
+    /** Search assets by original file name, for the export
+     * identity match. Emits signalIdentitySearch with the raw
+     * result items (id, name, capture time, dimensions).
+     */
+    void searchByFileName(const QString& name);
+
+    /** List the albums containing one asset (GET
+     * /albums?assetId=). Emits signalAlbumsForAsset.
+     */
+    void listAlbumsForAsset(const QString& assetId);
+
+    /** Move assets to the trash (DELETE /assets). Emits
+     * signalAssetsDeleted with the HTTP status.
+     */
+    void deleteAssets(const QStringList& assetIds);
+
     void cancel();
 
 Q_SIGNALS:
@@ -178,6 +195,9 @@ Q_SIGNALS:
     void signalAssetPatched(const QString& assetId, int httpStatus);
     void signalTagCreated(const QString& name, const QString& id, int httpStatus);
     void signalBulkTagged(const QString& tagId, int httpStatus);
+    void signalIdentitySearch(const QString& name, const QJsonArray& items);
+    void signalAlbumsForAsset(const QString& assetId, const QStringList& albumIds);
+    void signalAssetsDeleted(int httpStatus);
 
 private Q_SLOTS:
 

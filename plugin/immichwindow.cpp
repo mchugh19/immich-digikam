@@ -167,6 +167,30 @@ public:
         QString    localPath;
         SyncFields dk;
     };
+    // Export identity matching: files the checksum check missed
+    // get a name+capture-time+dimensions lookup before they are
+    // allowed to upload as new photos.
+    QList<QUrl>  identityQueue;
+    QUrl         identityUrl;
+    QString      identityCandidateId;
+    bool         identityStrict = false;
+    bool         identityWaitingThumb = false;
+    int          matchedSync   = 0;
+    int          matchedMulti  = 0;
+    int          replacedCount = 0;
+    QHash<QString, QString> replaceOldByPath;
+    struct ReplaceCtx
+    {
+        QString oldId;
+        QString newId;
+        QString localPath;
+    };
+    QList<ReplaceCtx> replaces;
+    QList<ReplaceCtx> restoreQueue;
+    QStringList  restoreAlbums;
+    bool         restoring = false;
+    QString      currentUploadPath;
+
     QList<SyncJob> syncJobs;
     int          syncUpdated   = 0;
     int          syncClean     = 0;
@@ -527,6 +551,9 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     connect(d->talker, &ImmichTalker::signalAssetPatched, this, &ImmichWindow::slotAssetPatched);
     connect(d->talker, &ImmichTalker::signalTagCreated, this, &ImmichWindow::slotTagCreated);
     connect(d->talker, &ImmichTalker::signalBulkTagged, this, &ImmichWindow::slotBulkTagged);
+    connect(d->talker, &ImmichTalker::signalIdentitySearch, this, &ImmichWindow::slotIdentitySearch);
+    connect(d->talker, &ImmichTalker::signalAlbumsForAsset, this, &ImmichWindow::slotRestoreAlbums);
+    connect(d->talker, &ImmichTalker::signalAssetsDeleted, this, &ImmichWindow::slotAssetsDeleted);
     connect(d->talker, &ImmichTalker::signalError, this, &ImmichWindow::slotError);
     connect(d->talker, &ImmichTalker::signalBusy, this, &ImmichWindow::slotBusy);
 }
@@ -1108,6 +1135,19 @@ void ImmichWindow::slotUploadSelection()
     d->syncAborted   = false;
     d->albumAssigned = false;
 
+    d->identityQueue.clear();
+    d->identityCandidateId.clear();
+    d->identityStrict = false;
+    d->identityWaitingThumb = false;
+    d->matchedSync   = 0;
+    d->matchedMulti  = 0;
+    d->replacedCount = 0;
+    d->replaceOldByPath.clear();
+    d->replaces.clear();
+    d->restoreQueue.clear();
+    d->restoreAlbums.clear();
+    d->restoring = false;
+
     setTransferButtonsEnabled(false);
     d->progress->setRange(0, d->total);
     d->progress->setValue(0);
@@ -1178,9 +1218,150 @@ void ImmichWindow::slotUploadCheck(const QMap<QString, QString>& duplicatesByPat
         }
     }
 
-    d->pending = remaining;
+    // What the checksum check missed goes through identity
+    // matching first: a file whose bytes changed in digiKam may
+    // still be a photo the server already has.
+    d->pending       = QList<QUrl>();
+    d->identityQueue = remaining;
     d->progress->setValue(d->done);
-    nextUpload();
+    nextIdentity();
+}
+
+void ImmichWindow::nextIdentity()
+{
+    if (d->cancelling || !d->uploading)
+    {
+        return;
+    }
+
+    if (d->identityQueue.isEmpty())
+    {
+        nextUpload();
+        return;
+    }
+
+    d->identityUrl = d->identityQueue.takeFirst();
+    const QString path = d->identityUrl.toLocalFile();
+    d->status->setText(QStringLiteral("Checking for an existing copy of %1...")
+                           .arg(QFileInfo(path).fileName()));
+    d->talker->searchByFileName(QFileInfo(path).fileName());
+}
+
+void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray& items)
+{
+    if (d->cancelling || !d->uploading)
+    {
+        return;
+    }
+
+    const QUrl    url  = d->identityUrl;
+    const QString path = url.toLocalFile();
+    QList<IdentityCandidate> candidates;
+
+    for (const QJsonValue& v : items)
+    {
+        const QJsonObject o = v.toObject();
+        IdentityCandidate c;
+        c.id            = o.value(QStringLiteral("id")).toString();
+        c.name          = o.value(QStringLiteral("originalFileName")).toString();
+        c.localDateTime = o.value(QStringLiteral("localDateTime")).toString();
+        c.createdAt     = o.value(QStringLiteral("createdAt")).toString();
+        c.width         = o.value(QStringLiteral("width")).toInt();
+        c.height        = o.value(QStringLiteral("height")).toInt();
+        candidates.append(c);
+    }
+
+    QString dateStr;
+    int     width  = 0;
+    int     height = 0;
+
+    if (d->iface)
+    {
+        const DItemInfo item(d->iface->itemInfo(url));
+        dateStr = item.dateTime().toString(QStringLiteral("yyyy-MM-ddTHH:mm:ss"));
+        width   = item.dimensions().width();
+        height  = item.dimensions().height();
+    }
+
+    const IdentityMatch match = chooseIdentityMatch(candidates, QFileInfo(path).fileName(),
+                                                    dateStr, width, height);
+
+    if (match.assetId.isEmpty())
+    {
+        d->pending.append(url);
+        nextIdentity();
+        return;
+    }
+
+    if (match.candidates > 1)
+    {
+        ++d->matchedMulti;
+    }
+
+    d->identityCandidateId  = match.assetId;
+    d->identityStrict       = match.strictTime;
+    d->identityWaitingThumb = true;
+    d->talker->fetchThumbnail(match.assetId);
+}
+
+void ImmichWindow::slotIdentityThumb(const QString& /*assetId*/, const QByteArray& bytes)
+{
+    if (d->cancelling || !d->uploading)
+    {
+        return;
+    }
+
+    const QUrl    url  = d->identityUrl;
+    const QString path = url.toLocalFile();
+
+    QImage localImage;
+    QImageReader reader(path);
+    reader.setAutoTransform(true);   // match the server thumbnail's orientation
+
+    if (reader.size().isValid())
+    {
+        QSize scaled = reader.size();
+        scaled.scale(320, 320, Qt::KeepAspectRatio);
+        reader.setScaledSize(scaled);
+    }
+
+    localImage = reader.read();
+
+    QImage remoteImage;
+    remoteImage.loadFromData(bytes);
+
+    // Undecodable on either side (RAW files, say) counts as
+    // "same": sync the metadata, never destroy on uncertainty.
+    const bool same = localImage.isNull() || remoteImage.isNull()
+                      || imagesLookSame(localImage, remoteImage);
+
+    if (same)
+    {
+        // The same photo with changed bytes: keep the server's
+        // copy, sync digiKam's metadata onto it.
+        d->uploadedIds.append(d->identityCandidateId);
+        Private::SyncJob job;
+        job.assetId   = d->identityCandidateId;
+        job.localPath = path;
+        job.dk        = dkFieldsFor(url);
+        d->syncJobs.append(job);
+        ++d->matchedSync;
+        ++d->alreadyThere;
+        ++d->done;
+        d->progress->setValue(d->done);
+        nextIdentity();
+        return;
+    }
+
+    if (d->identityStrict)
+    {
+        // A real edit of a photo the server holds: upload it and
+        // replace the old copy once the upload lands.
+        d->replaceOldByPath.insert(path, d->identityCandidateId);
+    }
+
+    d->pending.append(url);
+    nextIdentity();
 }
 
 void ImmichWindow::nextUpload()
@@ -1211,6 +1392,7 @@ void ImmichWindow::nextUpload()
 
     d->currentUploadFields = dkFieldsFor(url);
     d->haveUploadFields    = true;
+    d->currentUploadPath   = path;
     d->talker->uploadAsset(path, sidecarFor(url, path));
 }
 
@@ -1225,6 +1407,9 @@ void ImmichWindow::slotCancelTransfer()
     d->pending.clear();
     d->dlPending.clear();
     d->metaPending.clear();
+    d->identityQueue.clear();
+    d->identityWaitingThumb = false;
+    d->restoring = false;
     d->status->setText(QStringLiteral("Cancelling..."));
     d->talker->cancel();
 }
@@ -1255,6 +1440,27 @@ void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*
         storeSnapshot(assetId, d->currentUploadFields, QString(), QString(),
                       d->currentUploadFields);
         d->haveUploadFields = false;
+    }
+
+    const QString replacedOld = d->replaceOldByPath.take(d->currentUploadPath);
+
+    if (!replacedOld.isEmpty() && !assetId.isEmpty())
+    {
+        // This upload replaces an edited photo's old copy: its
+        // albums are restored and the old copy trashed after the
+        // uploads finish, and the new copy joins the sync set so
+        // its metadata converges too.
+        Private::ReplaceCtx ctx;
+        ctx.oldId     = replacedOld;
+        ctx.newId     = assetId;
+        ctx.localPath = d->currentUploadPath;
+        d->replaces.append(ctx);
+
+        Private::SyncJob job;
+        job.assetId   = assetId;
+        job.localPath = d->currentUploadPath;
+        job.dk        = d->currentUploadFields;
+        d->syncJobs.append(job);
     }
 
     ++d->done;
@@ -1292,11 +1498,17 @@ void ImmichWindow::finishUpload()
         return;
     }
 
-    maybeStartSync();
+    startRestoreOrSync();
 }
 
 void ImmichWindow::slotAlbumUpdated(bool changed)
 {
+    if (d->restoring)
+    {
+        restoreAdvanceAdd();
+        return;
+    }
+
     if (changed && !d->targetAlbumId.isEmpty())
     {
         // The album actually gained assets; its cached contents
@@ -1306,6 +1518,101 @@ void ImmichWindow::slotAlbumUpdated(bool changed)
     }
 
     d->albumAssigned = true;
+    startRestoreOrSync();
+}
+
+void ImmichWindow::startRestoreOrSync()
+{
+    if (d->replaces.isEmpty())
+    {
+        maybeStartSync();
+        return;
+    }
+
+    // Replaced photos: put each new copy into every album its
+    // predecessor belonged to, then trash the predecessors. Only
+    // when all of that has landed does the metadata sync start.
+    d->restoring    = true;
+    d->restoreQueue = d->replaces;
+    d->status->setText(QStringLiteral("Replacing %1 edited photo(s) in Immich...")
+                           .arg(d->restoreQueue.size()));
+    restoreNext();
+}
+
+void ImmichWindow::restoreNext()
+{
+    if (d->restoreQueue.isEmpty())
+    {
+        QStringList oldIds;
+
+        for (const Private::ReplaceCtx& ctx : d->replaces)
+        {
+            oldIds.append(ctx.oldId);
+        }
+
+        if (!oldIds.isEmpty())
+        {
+            d->talker->deleteAssets(oldIds);
+            return;
+        }
+
+        d->restoring = false;
+        maybeStartSync();
+        return;
+    }
+
+    d->talker->listAlbumsForAsset(d->restoreQueue.constFirst().oldId);
+}
+
+void ImmichWindow::slotRestoreAlbums(const QString& assetId, const QStringList& albumIds)
+{
+    if (!d->restoring || d->restoreQueue.isEmpty()
+        || d->restoreQueue.constFirst().oldId != assetId)
+    {
+        return;
+    }
+
+    d->restoreAlbums = albumIds;
+    restoreAdvanceAdd();
+}
+
+void ImmichWindow::restoreAdvanceAdd()
+{
+    if (d->restoreQueue.isEmpty())
+    {
+        restoreNext();
+        return;
+    }
+
+    if (d->restoreAlbums.isEmpty())
+    {
+        d->restoreQueue.removeFirst();
+        restoreNext();
+        return;
+    }
+
+    const QString albumId = d->restoreAlbums.takeFirst();
+    d->talker->addToAlbum(albumId, { d->restoreQueue.constFirst().newId });
+}
+
+void ImmichWindow::slotAssetsDeleted(int httpStatus)
+{
+    d->restoring = false;
+
+    if (httpStatus >= 200 && httpStatus < 300)
+    {
+        d->replacedCount = d->replaces.size();
+
+        for (const Private::ReplaceCtx& ctx : d->replaces)
+        {
+            d->syncState.remove(ctx.oldId);
+        }
+
+        saveSyncState(d->syncStatePath, d->syncState);
+    }
+
+    d->replaces.clear();
+    d->restoreQueue.clear();
     maybeStartSync();
 }
 
@@ -1319,6 +1626,26 @@ void ImmichWindow::printUploadSummary()
                .arg(d->total)
                .arg(d->alreadyThere)
                .arg(d->failed);
+
+    if (d->matchedSync > 0)
+    {
+        text += QStringLiteral(" %1 item(s) matched photos already in Immich;"
+                               " their metadata was synced instead of re-uploading.")
+                    .arg(d->matchedSync);
+
+        if (d->matchedMulti > 0)
+        {
+            text += QStringLiteral(" (%1 had several copies on the server; the newest was used.)")
+                        .arg(d->matchedMulti);
+        }
+    }
+
+    if (d->replacedCount > 0)
+    {
+        text += QStringLiteral(" %1 edited photo(s) replaced their Immich copy"
+                               " (the old copies are in Immich's trash).")
+                    .arg(d->replacedCount);
+    }
 
     if (d->syncRan)
     {
@@ -1960,6 +2287,13 @@ void ImmichWindow::slotPreviewSortChanged()
 
 void ImmichWindow::slotThumbnail(const QString& assetId, const QByteArray& bytes)
 {
+    if (d->identityWaitingThumb && assetId == d->identityCandidateId)
+    {
+        d->identityWaitingThumb = false;
+        slotIdentityThumb(assetId, bytes);
+        return;
+    }
+
     const QList<Private::ThumbJob> jobs = d->thumbInFlight.take(assetId);
 
     if (!bytes.isEmpty())

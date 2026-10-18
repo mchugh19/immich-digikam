@@ -269,6 +269,103 @@ private Q_SLOTS:
         QVERIFY(!g.conflict);
     }
 
+    // --- identity matching (immichsync.h) ----------------------
+
+    IdentityCandidate cand(const QString& id, const QString& name, const QString& time,
+                           const QString& created, int w, int h)
+    {
+        IdentityCandidate c;
+        c.id            = id;
+        c.name          = name;
+        c.localDateTime = time;
+        c.createdAt     = created;
+        c.width         = w;
+        c.height        = h;
+        return c;
+    }
+
+    void identityNeedsNameAndDimensions()
+    {
+        const QList<IdentityCandidate> cands {
+            cand(QStringLiteral("a"), QStringLiteral("other.jpg"),
+                 QStringLiteral("2026-10-18T19:15:00.000Z"), QStringLiteral("2026-10-18"), 800, 600),
+            cand(QStringLiteral("b"), QStringLiteral("photo.jpg"),
+                 QStringLiteral("2026-10-18T19:15:00.000Z"), QStringLiteral("2026-10-18"), 1024, 768),
+        };
+        const IdentityMatch m = chooseIdentityMatch(
+            cands, QStringLiteral("photo.jpg"), QStringLiteral("2026-10-18T19:15:00"), 800, 600);
+        QVERIFY(m.assetId.isEmpty());
+        QCOMPARE(m.candidates, 0);
+    }
+
+    void identityMatchesAndSwappedDimensions()
+    {
+        const QList<IdentityCandidate> cands {
+            cand(QStringLiteral("a"), QStringLiteral("photo.jpg"),
+                 QStringLiteral("2026-10-18T19:15:00.000Z"), QStringLiteral("2026-10-18"), 600, 800),
+        };
+        const IdentityMatch m = chooseIdentityMatch(
+            cands, QStringLiteral("photo.jpg"), QStringLiteral("2026-10-18T19:15:00"), 800, 600);
+        QCOMPARE(m.assetId, QStringLiteral("a"));
+        QVERIFY(m.strictTime);
+        QCOMPARE(m.candidates, 1);
+    }
+
+    void identityTimeDisambiguates()
+    {
+        const QList<IdentityCandidate> cands {
+            cand(QStringLiteral("old"), QStringLiteral("photo.jpg"),
+                 QStringLiteral("2026-10-18T10:00:00.000Z"), QStringLiteral("2026-10-19"), 800, 600),
+            cand(QStringLiteral("timed"), QStringLiteral("photo.jpg"),
+                 QStringLiteral("2026-10-18T19:15:00.000Z"), QStringLiteral("2026-10-18"), 800, 600),
+        };
+        const IdentityMatch m = chooseIdentityMatch(
+            cands, QStringLiteral("photo.jpg"), QStringLiteral("2026-10-18T19:15:00"), 800, 600);
+        QCOMPARE(m.assetId, QStringLiteral("timed"));
+        QVERIFY(m.strictTime);
+        QCOMPARE(m.candidates, 2);
+    }
+
+    void identityWithoutTimeTakesNewest()
+    {
+        const QList<IdentityCandidate> cands {
+            cand(QStringLiteral("first"), QStringLiteral("photo.jpg"),
+                 QStringLiteral("2026-10-18T10:00:00.000Z"), QStringLiteral("2026-10-18T01:00:00Z"), 800, 600),
+            cand(QStringLiteral("second"), QStringLiteral("photo.jpg"),
+                 QStringLiteral("2026-10-18T11:00:00.000Z"), QStringLiteral("2026-10-18T02:00:00Z"), 800, 600),
+        };
+        const IdentityMatch m = chooseIdentityMatch(
+            cands, QStringLiteral("photo.jpg"), QStringLiteral("2026-10-18T19:15:00"), 800, 600);
+        QCOMPARE(m.assetId, QStringLiteral("second"));
+        QVERIFY(!m.strictTime);
+    }
+
+    // --- pixel comparison (immichsync.h) -----------------------
+
+    QImage solid(int w, int h, int gray)
+    {
+        QImage img(w, h, QImage::Format_RGB32);
+        img.fill(QColor(gray, gray, gray).rgb());
+        return img;
+    }
+
+    void pixelsIdenticalAndReencoded()
+    {
+        QVERIFY(imagesLookSame(solid(64, 64, 100), solid(64, 64, 100)));
+        QCOMPARE(imageDifference(solid(64, 64, 100), solid(64, 64, 100)), 0.0);
+        // A few levels of re-encode noise still count as the same.
+        QVERIFY(imagesLookSame(solid(64, 64, 100), solid(64, 64, 103)));
+        // A different resolution compares fine after scaling.
+        QVERIFY(imagesLookSame(solid(800, 600, 100), solid(250, 188, 100)));
+    }
+
+    void pixelsEditedAndDifferent()
+    {
+        QVERIFY(!imagesLookSame(solid(64, 64, 100), solid(64, 64, 130)));
+        QVERIFY(!imagesLookSame(solid(64, 64, 0), solid(64, 64, 255)));
+        QVERIFY(imageDifference(QImage(), solid(64, 64, 100)) < 0.0);
+    }
+
     void gateBothChangedNewerSideWins()
     {
         const QDateTime older(QDate(2026, 10, 18), QTime(10, 0), QTimeZone::UTC);

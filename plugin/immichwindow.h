@@ -99,6 +99,14 @@ private Q_SLOTS:
     void slotUploadSelection();
     void slotUploadSucceeded(const QString& assetId, const QString& status);
     void slotUploadCheck(const QMap<QString, QString>& duplicatesByPath);
+    void nextIdentity();
+    void slotIdentitySearch(const QString& name, const QJsonArray& items);
+    void slotIdentityThumb(const QString& assetId, const QByteArray& bytes);
+    void startRestoreOrSync();
+    void restoreNext();
+    void restoreAdvanceAdd();
+    void slotRestoreAlbums(const QString& assetId, const QStringList& albumIds);
+    void slotAssetsDeleted(int httpStatus);
     void slotAlbumUpdated(bool changed);
     void slotDownloadAlbum();
     void slotAlbumAssets(const QList<ImmichAssetRef>& assets);
