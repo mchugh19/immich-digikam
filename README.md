@@ -65,3 +65,26 @@ for the server URL and API key, an album browser, and pull/push
 driven from the digiKam selection. Class layout mirrors the
 Piwigo plugin (plugin / session / talker / window); the talker's
 endpoints and upload fields are the ones the prototype verified.
+
+## Roadmap
+
+Future milestones, following the shapes digiKam's own web-service
+plugins use:
+
+- **A separate import plugin** for pull, the way the Google
+  services pair an export tool with an import tool. Today pull
+  lives inside the export dialog and writes originals plus
+  sidecars into a folder; a DPluginImport would plug into
+  digiKam's import flow, so downloaded albums land in a digiKam
+  album directly rather than in a folder the user then scans.
+- **A remote album browser**: navigate the server's album tree
+  inside the plugin (search, create, rename, asset counts) as the
+  target picker for both directions, instead of the current flat
+  album list. The Piwigo plugin's album browser is the model.
+- **Sidecars generated from digiKam's item metadata**, so tags,
+  rating and captions that exist only in digiKam's database (not
+  yet written to the file or an on-disk sidecar) also round-trip
+  on upload, matching what the Python prototype does from the
+  digiKam database.
+- **An icon set** for the plugin's actions (the `dk-immich`
+  theme icons are currently a placeholder).
