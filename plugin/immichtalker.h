@@ -15,6 +15,7 @@
 
 // Qt includes
 
+#include <QNetworkRequest>
 #include <QObject>
 
 // Local includes
