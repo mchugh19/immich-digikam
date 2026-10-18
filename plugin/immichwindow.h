@@ -76,6 +76,7 @@ private Q_SLOTS:
     void slotDownloadAlbum();
     void slotAlbumAssets(const QList<ImmichAssetRef>& assets);
     void slotDownloadFinished(const QString& assetId, bool ok);
+    void slotCancelTransfer();
     void slotError(const QString& msg);
     void slotBusy(bool val);
 

@@ -64,6 +64,7 @@ public:
     QPushButton*  newAlbumBtn = nullptr;
     QPushButton*  uploadBtn   = nullptr;
     QPushButton*  downloadBtn = nullptr;
+    QPushButton*  cancelBtn   = nullptr;
     QProgressBar* progress    = nullptr;
 
     // Album to select after the next list refresh (a just-created
@@ -79,6 +80,7 @@ public:
     int          alreadyThere = 0;
     bool         uploading   = false;
     bool         checking    = false;
+    bool         cancelling  = false;
 
     // Download queue state.
     QList<ImmichAssetRef> dlPending;
@@ -116,6 +118,8 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
     d->newAlbumBtn      = new QPushButton(QStringLiteral("New album..."));
     d->uploadBtn        = new QPushButton(QStringLiteral("Upload selection"));
     d->downloadBtn      = new QPushButton(QStringLiteral("Download album"));
+    d->cancelBtn        = new QPushButton(QStringLiteral("Cancel transfer"));
+    d->cancelBtn->setVisible(false);
     d->albumList        = new QListWidget;
     d->targetLabel      = new QLabel(QStringLiteral("Upload target: no album (library only)"));
     d->progress         = new QProgressBar;
@@ -132,6 +136,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
     layout->addWidget(d->uploadBtn);
     layout->addWidget(d->downloadBtn);
     layout->addWidget(d->progress);
+    layout->addWidget(d->cancelBtn);
     layout->addWidget(d->status);
 
     connect(saveBtn, &QPushButton::clicked, this, &ImmichWindow::slotSaveSettings);
@@ -147,6 +152,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
                     : QStringLiteral("Upload target: no album (library only)"));
             });
     connect(d->downloadBtn, &QPushButton::clicked, this, &ImmichWindow::slotDownloadAlbum);
+    connect(d->cancelBtn, &QPushButton::clicked, this, &ImmichWindow::slotCancelTransfer);
     connect(d->talker, &ImmichTalker::signalAlbums, this, &ImmichWindow::slotAlbums);
     connect(d->talker, &ImmichTalker::signalAlbumAssets, this, &ImmichWindow::slotAlbumAssets);
     connect(d->talker, &ImmichTalker::signalDownloadFinished, this, &ImmichWindow::slotDownloadFinished);
@@ -293,6 +299,7 @@ void ImmichWindow::slotUploadSelection()
     d->progress->setRange(0, d->total);
     d->progress->setValue(0);
     d->progress->setVisible(true);
+    d->cancelBtn->setVisible(true);
 
     // Ask the server which of these files it already has, so they
     // are skipped instead of re-uploaded.
@@ -383,8 +390,28 @@ void ImmichWindow::nextUpload()
     d->talker->uploadAsset(path, sidecarFor(url, path));
 }
 
+void ImmichWindow::slotCancelTransfer()
+{
+    if (!d->uploading && !d->downloading)
+    {
+        return;
+    }
+
+    d->cancelling = true;
+    d->pending.clear();
+    d->dlPending.clear();
+    d->status->setText(QStringLiteral("Cancelling..."));
+    d->talker->cancel();
+}
+
 void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*status*/)
 {
+    if (d->cancelling)
+    {
+        finishUpload();
+        return;
+    }
+
     if (!d->uploading)
     {
         return;
@@ -402,11 +429,21 @@ void ImmichWindow::finishUpload()
 {
     d->uploading = false;
     setTransferButtonsEnabled(true);
+    d->cancelBtn->setVisible(false);
 
     if (!d->tempSidecar.isEmpty())
     {
         QFile::remove(d->tempSidecar);
         d->tempSidecar.clear();
+    }
+
+    if (d->cancelling)
+    {
+        d->cancelling = false;
+        d->status->setText(QStringLiteral("Upload cancelled after %1 of %2 items.")
+                               .arg(d->done)
+                               .arg(d->total));
+        return;
     }
 
     if (!d->targetAlbumId.isEmpty() && !d->uploadedIds.isEmpty())
@@ -470,6 +507,7 @@ void ImmichWindow::slotDownloadAlbum()
     d->dlListing     = true;
 
     setTransferButtonsEnabled(false);
+    d->cancelBtn->setVisible(true);
     d->status->setText(QStringLiteral("Listing album assets..."));
 
     d->talker->listAlbumAssets(albumItem->data(Qt::UserRole).toString());
@@ -555,6 +593,12 @@ void ImmichWindow::nextDownload()
 
 void ImmichWindow::slotDownloadFinished(const QString& /*assetId*/, bool ok)
 {
+    if (d->cancelling)
+    {
+        finishDownload();
+        return;
+    }
+
     if (!d->downloading)
     {
         return;
@@ -585,6 +629,16 @@ void ImmichWindow::finishDownload()
 {
     d->downloading = false;
     setTransferButtonsEnabled(true);
+    d->cancelBtn->setVisible(false);
+
+    if (d->cancelling)
+    {
+        d->cancelling = false;
+        d->status->setText(QStringLiteral("Download cancelled after %1 of %2 assets.")
+                               .arg(d->dlDone)
+                               .arg(d->dlTotal));
+        return;
+    }
 
     d->status->setText(QStringLiteral("Downloaded %1 assets (%2 already on disk, %3 failed) to %4")
                            .arg(d->dlDownloaded)
@@ -595,6 +649,25 @@ void ImmichWindow::finishDownload()
 
 void ImmichWindow::slotError(const QString& msg)
 {
+    if (d->cancelling)
+    {
+        // The aborted reply lands here: finalize the transfer
+        // instead of advancing or falling back.
+        d->checking = false;
+
+        if (d->uploading)
+        {
+            finishUpload();
+        }
+        else if (d->downloading)
+        {
+            d->dlListing = false;
+            finishDownload();
+        }
+
+        return;
+    }
+
     if (d->checking)
     {
         // The duplicate check is an optimisation; if it fails,
