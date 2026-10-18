@@ -20,6 +20,8 @@
 
 // Qt includes
 
+#include <cmath>
+
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -250,7 +252,7 @@ void ImmichWindow::nextUpload()
                            .arg(d->done + 1)
                            .arg(d->total));
 
-    d->talker->uploadAsset(path, sidecarFor(path));
+    d->talker->uploadAsset(path, sidecarFor(url, path));
 }
 
 void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*status*/)
@@ -472,10 +474,12 @@ void ImmichWindow::slotBusy(bool val)
     }
 }
 
-QString ImmichWindow::sidecarFor(const QString& filePath)
+QString ImmichWindow::sidecarFor(const QUrl& url, const QString& filePath)
 {
     const QFileInfo info(filePath);
 
+    // 1. An on-disk sidecar digiKam maintains next to the file is
+    //    the richest source; it wins outright.
     const QString candidates[] = {
         filePath + QStringLiteral(".xmp"),
         info.path() + QLatin1Char('/') + info.completeBaseName() + QStringLiteral(".xmp")
@@ -489,9 +493,91 @@ QString ImmichWindow::sidecarFor(const QString& filePath)
         }
     }
 
-    // No on-disk sidecar: fall back to the file's embedded XMP
-    // packet, written out as a sidecar so Immich gives it the
-    // sidecar precedence it applies to uploaded metadata.
+    const QString tempPath = QDir::tempPath()
+                             + QStringLiteral("/immich-digikam-")
+                             + info.fileName()
+                             + QStringLiteral(".xmp");
+
+    // 2. Metadata that lives in digiKam's database (tags, rating,
+    //    caption, GPS set in digiKam but never written into the
+    //    file): generate the sidecar from the item info, in the
+    //    packet shape the bridge contract verified against a live
+    //    server.
+    if (d->iface)
+    {
+        const DItemInfo item(d->iface->itemInfo(url));
+        const QStringList tags    = item.tagsPath();
+        const int         rating  = item.rating();
+        const QString     comment = item.comment();
+        const bool        hasGps  = item.hasGeolocationInfo();
+
+        if (!tags.isEmpty() || rating > 0 || !comment.isEmpty() || hasGps)
+        {
+            QString elems;
+
+            if (!comment.isEmpty())
+            {
+                elems += QStringLiteral("\n   <dc:description><rdf:Alt><rdf:li xml:lang=\"x-default\">%1</rdf:li></rdf:Alt></dc:description>")
+                             .arg(comment.toHtmlEscaped());
+            }
+
+            if (rating > 0)
+            {
+                elems += QStringLiteral("\n   <xmp:Rating>%1</xmp:Rating>").arg(rating);
+            }
+
+            if (!tags.isEmpty())
+            {
+                elems += QStringLiteral("\n   <digiKam:TagsList><rdf:Bag>");
+
+                for (const QString& tag : tags)
+                {
+                    elems += QStringLiteral("\n      <rdf:li>%1</rdf:li>").arg(tag.toHtmlEscaped());
+                }
+
+                elems += QStringLiteral("\n   </rdf:Bag></digiKam:TagsList>");
+            }
+
+            if (hasGps)
+            {
+                auto gpsCoord = [](double value, bool isLatitude)
+                {
+                    const double absolute = std::fabs(value);
+                    const int    degrees  = int(absolute);
+                    const double minutes  = (absolute - degrees) * 60.0;
+                    const QChar  hemi     = isLatitude ? (value >= 0 ? QLatin1Char('N') : QLatin1Char('S'))
+                                                       : (value >= 0 ? QLatin1Char('E') : QLatin1Char('W'));
+                    return QStringLiteral("%1,%2%3").arg(degrees).arg(minutes, 0, 'f', 4).arg(hemi);
+                };
+
+                elems += QStringLiteral("\n   <exif:GPSLatitude>%1</exif:GPSLatitude>").arg(gpsCoord(item.latitude(), true));
+                elems += QStringLiteral("\n   <exif:GPSLongitude>%1</exif:GPSLongitude>").arg(gpsCoord(item.longitude(), false));
+            }
+
+            const QString xmp = QStringLiteral(
+                "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n"
+                " <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
+                "  <rdf:Description rdf:about=\"\"\n"
+                "    xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n"
+                "    xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n"
+                "    xmlns:exif=\"http://ns.adobe.com/exif/1.0/\"\n"
+                "    xmlns:digiKam=\"http://www.digikam.org/ns/1.0/\">%1\n"
+                "  </rdf:Description>\n"
+                " </rdf:RDF>\n"
+                "</x:xmpmeta>\n").arg(elems);
+
+            QFile file(tempPath);
+
+            if (file.open(QIODevice::WriteOnly) && file.write(xmp.toUtf8()) == xmp.toUtf8().size())
+            {
+                d->tempSidecar = tempPath;
+                return tempPath;
+            }
+        }
+    }
+
+    // 3. Fall back to the file's embedded XMP packet, written out
+    //    as a sidecar so Immich gives it sidecar precedence.
     DMetadata meta;
 
     if (meta.load(filePath))
@@ -500,10 +586,6 @@ QString ImmichWindow::sidecarFor(const QString& filePath)
 
         if (!xmp.isEmpty())
         {
-            const QString tempPath = QDir::tempPath()
-                                     + QStringLiteral("/immich-digikam-")
-                                     + info.fileName()
-                                     + QStringLiteral(".xmp");
             QFile file(tempPath);
 
             if (file.open(QIODevice::WriteOnly) && file.write(xmp) == xmp.size())
