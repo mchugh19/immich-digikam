@@ -202,6 +202,7 @@ public:
     QComboBox*   replaceCombo = nullptr;
     QRadioButton* libraryRadio = nullptr;
     QRadioButton* albumRadio   = nullptr;
+    QWidget*     pickerBox     = nullptr;
     bool         restoring = false;
     QString      currentUploadPath;
 
@@ -497,11 +498,13 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
 
     if (d->mode == Mode::Export)
     {
-        // Destination choice, shaped by the KDE HIG: the choice
-        // is mutually exclusive, so it is a radio group with a
-        // caption; the album picker is subordinate to the Album
-        // radio (indented beneath it) and is disabled, not
-        // hidden, while Library only is chosen.
+        // Destination choice: the choice is mutually exclusive,
+        // so it is a radio group with a caption (the KDE HIG's
+        // shape for this), and the album picker is subordinate
+        // to the Album radio, indented beneath it. The picker is
+        // hidden entirely while Library only is chosen, so a
+        // library export gives the whole window height to the
+        // selection preview.
         auto* const targetGroup = new QVBoxLayout;
         targetGroup->addWidget(new QLabel(QStringLiteral("Upload to")));
 
@@ -512,12 +515,12 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
         targetGroup->addLayout(targetRadios);
         layout->addLayout(targetGroup);
 
-        auto* const pickerBox = new QWidget;
-        auto* const pickerLayout = new QVBoxLayout(pickerBox);
+        d->pickerBox = new QWidget;
+        auto* const pickerLayout = new QVBoxLayout(d->pickerBox);
         pickerLayout->setContentsMargins(48, 0, 0, 0);
         pickerLayout->addWidget(d->filterEdit);
         pickerLayout->addWidget(d->albumGrid, 2);
-        layout->addWidget(pickerBox, 2);
+        layout->addWidget(d->pickerBox, 2);
         layout->addWidget(d->tagGrid, 2);
     }
     else
@@ -796,9 +799,8 @@ void ImmichWindow::applyTargetMode()
     }
 
     const bool album = d->albumRadio->isChecked();
-    d->filterEdit->setEnabled(album);
-    d->albumGrid->setEnabled(album);
-    d->newAlbumBtn->setEnabled(album);
+    d->pickerBox->setVisible(album);
+    d->newAlbumBtn->setVisible(album);
     updateTargetLabel();
     updateExportStatus();
 }

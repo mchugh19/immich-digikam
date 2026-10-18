@@ -17,8 +17,9 @@ digiKam's own web-service plugins (Piwigo in particular).
 - Export destination: an "Upload to" radio choice between
   "Library only" (the default; uploads go to the Immich library
   with no album) and "Album" (the selected album tile is the
-  target). The album picker is disabled, not hidden, while
-  "Library only" is chosen, and the choice is remembered.
+  target). The album picker is hidden while "Library only" is
+  chosen, so the selection preview gets the full window, and
+  the choice is remembered.
   Everything else about an export (dedupe, metadata sync,
   identity matching, replace handling) works the same either
   way; only the album assignment step is skipped.
