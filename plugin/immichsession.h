@@ -25,8 +25,9 @@ namespace DigikamGenericImmichPlugin
  * Persisted in digiKam's configuration (group "Immich Settings"),
  * the same way digiKam's other web-service plugins keep theirs.
  *
- * The API key needs these permissions on the Immich server:
- * asset.create, asset.read, asset.download, asset.view,
+ * The API key needs these permissions on the Immich server
+ * (names as of Immich 3.3.3):
+ * asset.upload, asset.read, asset.download, asset.view,
  * album.read, album.create, albumAsset.create.
  */
 class ImmichSession
