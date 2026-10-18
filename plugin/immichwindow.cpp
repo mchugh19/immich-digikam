@@ -198,6 +198,12 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     setWindowTitle(d->mode == Mode::Export ? QStringLiteral("Export to Immich")
                                            : QStringLiteral("Import from Immich"));
 
+    // A functional default: the source table and the preview grid
+    // are the working area, and both are cramped at the layout's
+    // raw size hint. Growth goes to them via the layout stretch.
+    resize(1040, 760);
+    setMinimumSize(760, 560);
+
     auto* const form = new QFormLayout;
     d->urlEdit = new QLineEdit(d->session->url());
     d->urlEdit->setPlaceholderText(QStringLiteral("https://photos.example.com"));
@@ -280,12 +286,12 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
         layout->addLayout(sourceRow);
     }
 
-    layout->addWidget(d->sourceTable);
+    layout->addWidget(d->sourceTable, 2);
 
     if (d->mode == Mode::Import)
     {
         layout->addLayout(previewRow);
-        layout->addWidget(d->previewList);
+        layout->addWidget(d->previewList, 3);
     }
 
     layout->addWidget(d->targetLabel);
