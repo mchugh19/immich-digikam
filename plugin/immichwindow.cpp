@@ -34,6 +34,7 @@
 #include <QListWidget>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSet>
 #include <QVBoxLayout>
 
 // Local includes
@@ -479,22 +480,52 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
     d->dlListing = false;
     d->dlTotal   = assets.size();
 
+    QSet<QString> claimed;
+
     for (const ImmichAssetRef& asset : assets)
     {
         if (asset.fileName.isEmpty())
         {
             ++d->dlFailed;
             ++d->dlDone;
+            continue;
         }
-        else if (QFileInfo::exists(d->dlDir + QLatin1Char('/') + asset.fileName))
+
+        QString name = asset.fileName;
+
+        if (!claimed.contains(name) && QFileInfo::exists(d->dlDir + QLatin1Char('/') + name))
         {
+            // Already downloaded by an earlier run.
+            claimed.insert(name);
             ++d->dlSkipped;
             ++d->dlDone;
+            continue;
         }
-        else
+
+        if (claimed.contains(name))
         {
-            d->dlPending.append(asset);
+            // A different asset in the same album carries the same
+            // file name: keep both, disambiguated by asset id.
+            const QFileInfo info(name);
+            const QString suffix = info.suffix().isEmpty() ? QString()
+                                                            : QStringLiteral(".") + info.suffix();
+            name = info.completeBaseName()
+                   + QStringLiteral("-") + asset.id.left(8)
+                   + suffix;
+
+            if (QFileInfo::exists(d->dlDir + QLatin1Char('/') + name))
+            {
+                claimed.insert(name);
+                ++d->dlSkipped;
+                ++d->dlDone;
+                continue;
+            }
         }
+
+        claimed.insert(name);
+        ImmichAssetRef target = asset;
+        target.fileName       = name;
+        d->dlPending.append(target);
     }
 
     d->progress->setRange(0, d->dlTotal);

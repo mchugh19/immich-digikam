@@ -113,6 +113,7 @@ private:
 
     QNetworkRequest makeRequest(const QString& path) const;
     void sendJson(const QString& method, const QString& path, const QByteArray& body);
+    void fetchAlbumAssetsPage(int page);
 
     class Private;
     Private* const d;

@@ -47,6 +47,10 @@ public:
 
     // Download context per reply: asset id and destination path.
     QHash<QNetworkReply*, QPair<QString, QString> > downloadCtx;
+
+    // Album-asset listing accumulates across search pages.
+    QList<ImmichAssetRef> listingAccum;
+    QString               listingAlbumId;
 };
 
 ImmichTalker::ImmichTalker(ImmichSession* const session, QObject* const parent)
@@ -199,11 +203,17 @@ void ImmichTalker::uploadAsset(const QString& filePath, const QString& sidecarPa
 
 void ImmichTalker::listAlbumAssets(const QString& albumId)
 {
-    // One large page instead of following nextPage: albums beyond
-    // a thousand assets are out of scope for the current pull.
+    d->listingAccum.clear();
+    d->listingAlbumId = albumId;
+    fetchAlbumAssetsPage(1);
+}
+
+void ImmichTalker::fetchAlbumAssetsPage(int page)
+{
     const QJsonObject obj {
-        { QStringLiteral("albumIds"), QJsonArray { albumId } },
-        { QStringLiteral("size"),     1000 }
+        { QStringLiteral("albumIds"), QJsonArray { d->listingAlbumId } },
+        { QStringLiteral("size"),     250 },
+        { QStringLiteral("page"),     page }
     };
 
     QNetworkRequest req = makeRequest(QStringLiteral("/search/metadata"));
@@ -366,18 +376,30 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
         case Private::Op::AlbumAssets:
         {
-            QList<ImmichAssetRef> assets;
-            const QJsonArray items = doc.object()
-                                         .value(QStringLiteral("assets")).toObject()
-                                         .value(QStringLiteral("items")).toArray();
+            const QJsonObject assetsObj = doc.object().value(QStringLiteral("assets")).toObject();
+            const QJsonArray items = assetsObj.value(QStringLiteral("items")).toArray();
+
             for (const QJsonValue& val : items)
             {
                 const QJsonObject obj = val.toObject();
                 ImmichAssetRef asset;
                 asset.id       = obj.value(QStringLiteral("id")).toString();
                 asset.fileName = obj.value(QStringLiteral("originalFileName")).toString();
-                assets.append(asset);
+                d->listingAccum.append(asset);
             }
+
+            // Follow the search pagination until the server stops
+            // handing out a next page.
+            const QString nextPage = assetsObj.value(QStringLiteral("nextPage")).toString();
+
+            if (!nextPage.isEmpty())
+            {
+                fetchAlbumAssetsPage(nextPage.toInt());
+                break;
+            }
+
+            const QList<ImmichAssetRef> assets = d->listingAccum;
+            d->listingAccum.clear();
             Q_EMIT signalAlbumAssets(assets);
             break;
         }
