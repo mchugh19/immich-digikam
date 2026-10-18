@@ -505,9 +505,12 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
             {
                 const QJsonObject obj = val.toObject();
                 ImmichAlbum album;
-                album.id         = obj.value(QStringLiteral("id")).toString();
-                album.name       = obj.value(QStringLiteral("albumName")).toString();
-                album.assetCount = obj.value(QStringLiteral("assetCount")).toInt();
+                album.id               = obj.value(QStringLiteral("id")).toString();
+                album.name             = obj.value(QStringLiteral("albumName")).toString();
+                album.assetCount       = obj.value(QStringLiteral("assetCount")).toInt();
+                album.startDate        = obj.value(QStringLiteral("startDate")).toString();
+                album.endDate          = obj.value(QStringLiteral("endDate")).toString();
+                album.thumbnailAssetId = obj.value(QStringLiteral("albumThumbnailAssetId")).toString();
                 albums.append(album);
             }
             Q_EMIT signalAlbums(albums);

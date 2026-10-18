@@ -20,12 +20,18 @@
 namespace DigikamGenericImmichPlugin
 {
 
-/** One Immich album, as returned by GET /albums. */
+/** One Immich album, as returned by GET /albums. startDate and
+ * endDate are the capture dates of the album's oldest and newest
+ * assets (the date range Immich's own album view shows).
+ */
 struct ImmichAlbum
 {
     QString id;
     QString name;
     int     assetCount = 0;
+    QString startDate;
+    QString endDate;
+    QString thumbnailAssetId;
 };
 
 /** One Immich tag, as returned by GET /tags. */
