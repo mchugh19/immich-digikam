@@ -44,8 +44,11 @@ public:
     enum class Op { None, ListAlbums, ListTags, CreateAlbum, AddToAlbum, Upload,
                     AlbumAssets, DownloadOriginal, DownloadSidecar,
                     DownloadRecord, MetaSidecar, MetaRecord,
-                    BulkCheck, Thumbnail };
+                    BulkCheck, Thumbnail,
+                    SyncRecord, PatchAsset, CreateTag, BulkTagAssets };
     QHash<QNetworkReply*, Op> ops;
+    // Sync context per reply: the asset id (or tag name / id).
+    QHash<QNetworkReply*, QString> syncCtx;
 
     // Download context per reply: asset id and destination path.
     QHash<QNetworkReply*, QPair<QString, QString> > downloadCtx;
@@ -311,6 +314,58 @@ void ImmichTalker::checkUploads(const QMap<QString, QString>& checksumsByPath)
     Q_EMIT signalBusy(true);
 }
 
+void ImmichTalker::fetchAssetForSync(const QString& assetId)
+{
+    QNetworkReply* const reply = d->net->get(
+        makeRequest(QStringLiteral("/assets/%1").arg(assetId)));
+    d->ops.insert(reply, Private::Op::SyncRecord);
+    d->syncCtx.insert(reply, assetId);
+    Q_EMIT signalBusy(true);
+}
+
+void ImmichTalker::updateAsset(const QString& assetId, const QJsonObject& body)
+{
+    QNetworkRequest req = makeRequest(QStringLiteral("/assets/%1").arg(assetId));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply* const reply = d->net->put(req, QJsonDocument(body).toJson());
+    d->ops.insert(reply, Private::Op::PatchAsset);
+    d->syncCtx.insert(reply, assetId);
+    Q_EMIT signalBusy(true);
+}
+
+void ImmichTalker::createTag(const QString& name)
+{
+    const QJsonObject obj { { QStringLiteral("name"), name } };
+    QNetworkRequest req = makeRequest(QStringLiteral("/tags"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
+    d->ops.insert(reply, Private::Op::CreateTag);
+    d->syncCtx.insert(reply, name);
+    Q_EMIT signalBusy(true);
+}
+
+void ImmichTalker::bulkTagAssets(const QString& tagId, const QStringList& assetIds)
+{
+    QJsonArray ids;
+
+    for (const QString& id : assetIds)
+    {
+        ids.append(id);
+    }
+
+    const QJsonObject obj {
+        { QStringLiteral("tagId"),    tagId },
+        { QStringLiteral("assetIds"), ids   }
+    };
+
+    QNetworkRequest req = makeRequest(QStringLiteral("/tags/assets"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply* const reply = d->net->put(req, QJsonDocument(obj).toJson());
+    d->ops.insert(reply, Private::Op::BulkTagAssets);
+    d->syncCtx.insert(reply, tagId);
+    Q_EMIT signalBusy(true);
+}
+
 void ImmichTalker::cancel()
 {
     for (QNetworkReply* const reply : d->ops.keys())
@@ -351,6 +406,21 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
             if (httpStatus == 200 && !body.isEmpty())
             {
+                // Do not rewrite an identical sidecar: the write
+                // would bump the file's time and masquerade as a
+                // local metadata edit.
+                QFile existing(targetPath);
+                const QByteArray current = existing.open(QIODevice::ReadOnly)
+                                               ? existing.readAll()
+                                               : QByteArray();
+                existing.close();
+
+                if (current == body)
+                {
+                    Q_EMIT signalMetaFinished(assetId, false);
+                    return;
+                }
+
                 QFile file(targetPath);
 
                 if (file.open(QIODevice::WriteOnly))
@@ -377,11 +447,24 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         if (op == Private::Op::DownloadSidecar)
         {
             // The original is already on disk; a missing (404) or
-            // unfetchable sidecar does not fail the download.
+            // unfetchable sidecar does not fail the download. An
+            // identical local sidecar is left untouched.
             bool sidecarWritten = false;
 
             if (!failed && httpStatus == 200 && !body.isEmpty())
             {
+                QFile existing(targetPath);
+                const QByteArray current = existing.open(QIODevice::ReadOnly)
+                                               ? existing.readAll()
+                                               : QByteArray();
+                existing.close();
+
+                if (current == body)
+                {
+                    Q_EMIT signalDownloadFinished(assetId, true);
+                    return;
+                }
+
                 QFile file(targetPath);
 
                 if (file.open(QIODevice::WriteOnly))
@@ -445,6 +528,38 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
                                                                             : QByteArray();
         reply->deleteLater();
         Q_EMIT signalThumbnail(assetId, bytes);
+        return;
+    }
+
+    if (op == Private::Op::SyncRecord || op == Private::Op::PatchAsset
+        || op == Private::Op::CreateTag || op == Private::Op::BulkTagAssets)
+    {
+        // The sync flow wants the HTTP status itself (a 403 is
+        // information, not a generic error), so these replies
+        // bypass the shared error branch below.
+        const QString ctx        = d->syncCtx.take(reply);
+        const int     httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QJsonObject obj    = QJsonDocument::fromJson(reply->readAll()).object();
+        reply->deleteLater();
+
+        switch (op)
+        {
+            case Private::Op::SyncRecord:
+                Q_EMIT signalSyncRecord(ctx, obj, httpStatus);
+                break;
+            case Private::Op::PatchAsset:
+                Q_EMIT signalAssetPatched(ctx, httpStatus);
+                break;
+            case Private::Op::CreateTag:
+                Q_EMIT signalTagCreated(ctx, obj.value(QStringLiteral("id")).toString(), httpStatus);
+                break;
+            case Private::Op::BulkTagAssets:
+                Q_EMIT signalBulkTagged(ctx, httpStatus);
+                break;
+            default:
+                break;
+        }
+
         return;
     }
 

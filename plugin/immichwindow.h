@@ -41,6 +41,8 @@ using namespace Digikam;
 namespace DigikamGenericImmichPlugin
 {
 
+struct SyncFields;
+
 class ImmichSession;
 class ImmichTalker;
 
@@ -109,6 +111,10 @@ private Q_SLOTS:
     void slotCancelTransfer();
     void slotError(const QString& msg);
     void slotBusy(bool val);
+    void slotSyncRecord(const QString& assetId, const QJsonObject& record, int httpStatus);
+    void slotAssetPatched(const QString& assetId, int httpStatus);
+    void slotTagCreated(const QString& name, const QString& id, int httpStatus);
+    void slotBulkTagged(const QString& tagId, int httpStatus);
 
 private:
 
@@ -132,12 +138,26 @@ private:
     void updateExportStatus();
     void nextUpload();
     void finishUpload();
+    void printUploadSummary();
+    void maybeStartSync();
+    void nextSyncAsset();
+    void finishSyncAsset(bool wrote);
+    void advanceSyncAsset();
+    void startSyncTags();
+    void handleSyncTagList(const QList<ImmichTag>& tags);
+    void nextTagCreate();
+    void applyNextBulkTag();
+    void finishSync();
+    void storeSnapshot(const QString& assetId, const SyncFields& serverFields,
+                       const QString& serverUpdatedAt, const QString& checksum,
+                       const SyncFields& dkFields);
     void nextDownload();
     void continueDownloads();
     void nextMeta();
     bool writeRecordSidecar(const QString& targetFile, const QJsonObject& record);
     void finishDownload();
     QString sidecarFor(const QUrl& url, const QString& filePath);
+    SyncFields dkFieldsFor(const QUrl& url) const;
 
     class Private;
     Private* const d;

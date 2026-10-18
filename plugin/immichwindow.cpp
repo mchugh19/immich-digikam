@@ -54,6 +54,7 @@
 #include "dinfointerface.h"
 #include "dmetadata.h"
 #include "immichsession.h"
+#include "immichsync.h"
 #include "immichtalker.h"
 #include "immichxmp.h"
 
@@ -154,6 +155,53 @@ public:
     int          dlFailed      = 0;
     bool         downloading   = false;
     bool         dlListing     = false;
+
+    // Metadata sync for files the upload check found already on
+    // the server: their digiKam-side fields are compared with the
+    // server's asset record and only the differences are written
+    // (PUT /assets, tags API). Jobs carry the digiKam fields
+    // captured when the check ran.
+    struct SyncJob
+    {
+        QString    assetId;
+        QString    localPath;
+        SyncFields dk;
+    };
+    QList<SyncJob> syncJobs;
+    int          syncIndex     = 0;
+    int          syncUpdated   = 0;
+    int          syncClean     = 0;
+    int          syncFailed    = 0;
+    int          syncConflicts = 0;
+    bool         syncing       = false;
+    bool         syncRan       = false;
+    bool         syncPermsDenied = false;
+    bool         syncAborted   = false;
+    bool         curSyncFailed = false;
+    bool         curSyncWrote  = false;
+    SyncPlan     curPlan;
+    ServerFields curServer;
+    // Tag values to add, accumulated across the run's assets,
+    // applied in bulk at the end: value -> asset ids.
+    QMap<QString, QStringList>    syncTagAdds;
+    QMap<QString, QString>        syncTagIds;
+    QStringList                   syncTagsToCreate;
+    QList<QPair<QString, QStringList>> syncBulkQueue;
+    enum class TagsPurpose { Ui, Sync };
+    TagsPurpose  tagsPurpose   = TagsPurpose::Ui;
+    bool         albumAssigned = false;
+
+    // Fields of the item currently uploading, kept so a sync
+    // snapshot can be recorded when it lands.
+    SyncFields   currentUploadFields;
+    bool         haveUploadFields = false;
+
+    // Per-asset sync snapshots (asset id -> SyncSnapshot JSON),
+    // persisted across sessions; they are what tells a later run
+    // whether the server side, the digiKam side, both, or
+    // neither moved since the last sync.
+    QJsonObject  syncState;
+    QString      syncStatePath;
 };
 
 namespace
@@ -208,6 +256,12 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->session = new ImmichSession;
     d->session->load();
     d->talker  = new ImmichTalker(d->session, this);
+
+    // Sync snapshots live next to digiKam's other app data.
+    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(appData);
+    d->syncStatePath = appData + QStringLiteral("/immich-sync-state.json");
+    d->syncState     = loadSyncState(d->syncStatePath);
 
     // On-disk thumbnail cache (album covers and contents
     // previews share the /assets/<id>/thumbnail endpoint), in
@@ -457,6 +511,10 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     connect(d->talker, &ImmichTalker::signalAlbumUpdated, this, &ImmichWindow::slotAlbumUpdated);
     connect(d->talker, &ImmichTalker::signalUploadSucceeded, this, &ImmichWindow::slotUploadSucceeded);
     connect(d->talker, &ImmichTalker::signalUploadCheck, this, &ImmichWindow::slotUploadCheck);
+    connect(d->talker, &ImmichTalker::signalSyncRecord, this, &ImmichWindow::slotSyncRecord);
+    connect(d->talker, &ImmichTalker::signalAssetPatched, this, &ImmichWindow::slotAssetPatched);
+    connect(d->talker, &ImmichTalker::signalTagCreated, this, &ImmichWindow::slotTagCreated);
+    connect(d->talker, &ImmichTalker::signalBulkTagged, this, &ImmichWindow::slotBulkTagged);
     connect(d->talker, &ImmichTalker::signalError, this, &ImmichWindow::slotError);
     connect(d->talker, &ImmichTalker::signalBusy, this, &ImmichWindow::slotBusy);
 }
@@ -873,6 +931,13 @@ void ImmichWindow::slotFilterChanged(const QString&)
 
 void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
 {
+    if (d->tagsPurpose == Private::TagsPurpose::Sync)
+    {
+        d->tagsPurpose = Private::TagsPurpose::Ui;
+        handleSyncTagList(tags);
+        return;
+    }
+
     const QString restoreId = currentSourceId();
 
     d->tagGrid->clear();
@@ -1015,6 +1080,18 @@ void ImmichWindow::slotUploadSelection()
     d->alreadyThere = 0;
     d->uploading   = true;
 
+    d->syncJobs.clear();
+    d->syncTagAdds.clear();
+    d->syncIndex     = 0;
+    d->syncUpdated   = 0;
+    d->syncClean     = 0;
+    d->syncFailed    = 0;
+    d->syncConflicts = 0;
+    d->syncRan       = false;
+    d->syncPermsDenied = false;
+    d->syncAborted   = false;
+    d->albumAssigned = false;
+
     setTransferButtonsEnabled(false);
     d->progress->setRange(0, d->total);
     d->progress->setValue(0);
@@ -1069,8 +1146,17 @@ void ImmichWindow::slotUploadCheck(const QMap<QString, QString>& duplicatesByPat
         else
         {
             // Already on the server: count it, and keep its id so
-            // a target album still gets the asset assigned.
+            // a target album still gets the asset assigned. Its
+            // digiKam metadata is queued for the diff sync that
+            // runs after the uploads: the file itself is not
+            // re-sent, but changed tags, rating, caption and GPS
+            // still reach the server through the API.
             d->uploadedIds.append(assetId);
+            Private::SyncJob job;
+            job.assetId   = assetId;
+            job.localPath = url.toLocalFile();
+            job.dk        = dkFieldsFor(url);
+            d->syncJobs.append(job);
             ++d->alreadyThere;
             ++d->done;
         }
@@ -1107,6 +1193,8 @@ void ImmichWindow::nextUpload()
                            .arg(d->done + 1)
                            .arg(d->total));
 
+    d->currentUploadFields = dkFieldsFor(url);
+    d->haveUploadFields    = true;
     d->talker->uploadAsset(path, sidecarFor(url, path));
 }
 
@@ -1141,6 +1229,18 @@ void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*
     // Duplicates count too: the asset exists on the server, so it
     // can still be assigned to the target album.
     d->uploadedIds.append(assetId);
+
+    if (d->haveUploadFields && !assetId.isEmpty())
+    {
+        // Baseline snapshot for a fresh upload: what digiKam
+        // sent is what the server now holds (the sidecar merge
+        // may add preserved fields, but the synced fields are
+        // these). The next run diffs against this.
+        storeSnapshot(assetId, d->currentUploadFields, QString(), QString(),
+                      d->currentUploadFields);
+        d->haveUploadFields = false;
+    }
+
     ++d->done;
     d->progress->setValue(d->done);
     nextUpload();
@@ -1176,11 +1276,7 @@ void ImmichWindow::finishUpload()
         return;
     }
 
-    d->status->setText(QStringLiteral("Uploaded %1 of %2 items (%3 already on the server, %4 failed).")
-                           .arg(d->done - d->failed - d->alreadyThere)
-                           .arg(d->total)
-                           .arg(d->alreadyThere)
-                           .arg(d->failed));
+    maybeStartSync();
 }
 
 void ImmichWindow::slotAlbumUpdated(bool changed)
@@ -1193,11 +1289,425 @@ void ImmichWindow::slotAlbumUpdated(bool changed)
         d->listingCache.remove(QStringLiteral("album:") + d->targetAlbumId);
     }
 
-    d->status->setText(QStringLiteral("Uploaded %1 of %2 items (%3 already on the server, %4 failed) and added them to the album.")
-                           .arg(d->done - d->failed - d->alreadyThere)
-                           .arg(d->total)
-                           .arg(d->alreadyThere)
-                           .arg(d->failed));
+    d->albumAssigned = true;
+    maybeStartSync();
+}
+
+void ImmichWindow::printUploadSummary()
+{
+    QString text = d->albumAssigned
+        ? QStringLiteral("Uploaded %1 of %2 items (%3 already on the server, %4 failed) and added them to the album.")
+        : QStringLiteral("Uploaded %1 of %2 items (%3 already on the server, %4 failed).");
+
+    text = text.arg(d->done - d->failed - d->alreadyThere)
+               .arg(d->total)
+               .arg(d->alreadyThere)
+               .arg(d->failed);
+
+    if (d->syncRan)
+    {
+        text += QStringLiteral(" Metadata synced for %1 already-uploaded items (%2 unchanged, %3 failed).")
+                    .arg(d->syncUpdated)
+                    .arg(d->syncClean)
+                    .arg(d->syncFailed);
+
+        if (d->syncConflicts > 0)
+        {
+            text += QStringLiteral(" %1 conflict(s) settled by timestamp.")
+                        .arg(d->syncConflicts);
+        }
+
+        if (d->syncPermsDenied)
+        {
+            text += QStringLiteral(" Metadata sync was refused: the API key also needs"
+                                   " asset.update, tag.create and tag.asset.");
+        }
+    }
+
+    d->status->setText(text);
+}
+
+void ImmichWindow::maybeStartSync()
+{
+    if (d->syncJobs.isEmpty())
+    {
+        printUploadSummary();
+        return;
+    }
+
+    d->syncing = true;
+    d->syncRan = true;
+    d->syncIndex = 0;
+    d->status->setText(QStringLiteral("Syncing metadata for %1 already-uploaded items...")
+                           .arg(d->syncJobs.size()));
+    nextSyncAsset();
+}
+
+void ImmichWindow::nextSyncAsset()
+{
+    if (d->syncAborted || d->syncIndex >= d->syncJobs.size())
+    {
+        startSyncTags();
+        return;
+    }
+
+    const Private::SyncJob& job = d->syncJobs.at(d->syncIndex);
+    d->curSyncFailed = false;
+    d->curSyncWrote  = false;
+    d->talker->fetchAssetForSync(job.assetId);
+}
+
+void ImmichWindow::slotSyncRecord(const QString& assetId, const QJsonObject& record, int httpStatus)
+{
+    if (!d->syncing || d->syncIndex >= d->syncJobs.size())
+    {
+        return;
+    }
+
+    const Private::SyncJob job = d->syncJobs.at(d->syncIndex);
+
+    if (job.assetId != assetId || httpStatus != 200 || record.isEmpty())
+    {
+        d->curSyncFailed = true;
+        finishSyncAsset(false);
+        return;
+    }
+
+    const ServerFields sv = serverFieldsFromRecord(record);
+    d->curServer = sv;
+    SyncPlan plan = planSync(job.dk, sv.fields);
+
+    // Snapshot gating: did either side move since the last sync?
+    const QJsonObject snapObj = d->syncState.value(assetId).toObject();
+
+    if (!snapObj.isEmpty())
+    {
+        const SyncSnapshot snap = SyncSnapshot::fromJson(snapObj);
+        const bool serverChanged = (snap.serverUpdatedAt != sv.updatedAt);
+        const bool dkChanged     = (snap.dkHash != syncFieldHash(job.dk));
+
+        if (serverChanged && !dkChanged)
+        {
+            // Only Immich moved: leave its state exactly as it
+            // is and refresh the snapshot to match.
+            ++d->syncClean;
+            storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.checksum, job.dk);
+            advanceSyncAsset();
+            return;
+        }
+
+        if (serverChanged && dkChanged)
+        {
+            // Both moved: tags merge anyway (adds are lossless),
+            // but the scalar fields go to whichever side changed
+            // most recently.
+            ++d->syncConflicts;
+            const QDateTime serverTime = QDateTime::fromString(sv.updatedAt, Qt::ISODateWithMs);
+            const QDateTime localTime  = QFileInfo(job.localPath).lastModified();
+
+            if (serverTime.isValid() && localTime.isValid() && serverTime > localTime)
+            {
+                plan.dropScalars();
+            }
+        }
+    }
+
+    d->curPlan = plan;
+
+    for (const QString& tag : plan.tagsToAdd)
+    {
+        d->syncTagAdds[tag].append(assetId);
+        d->curSyncWrote = true;
+    }
+
+    if (!plan.scalars())
+    {
+        finishSyncAsset(plan.any());
+        return;
+    }
+
+    QJsonObject body;
+
+    if (plan.setRating)
+    {
+        body.insert(QStringLiteral("rating"),
+                    plan.rating == 0 ? QJsonValue() : QJsonValue(plan.rating));
+    }
+
+    if (plan.setDescription)
+    {
+        body.insert(QStringLiteral("description"), plan.description);
+    }
+
+    if (plan.setGps)
+    {
+        body.insert(QStringLiteral("latitude"),  plan.latitude);
+        body.insert(QStringLiteral("longitude"), plan.longitude);
+    }
+
+    d->talker->updateAsset(assetId, body);
+}
+
+void ImmichWindow::slotAssetPatched(const QString& /*assetId*/, int httpStatus)
+{
+    if (!d->syncing)
+    {
+        return;
+    }
+
+    if (httpStatus == 403)
+    {
+        d->syncPermsDenied = true;
+        d->syncAborted     = true;
+        d->curSyncFailed   = true;
+    }
+    else if (httpStatus < 200 || httpStatus >= 300)
+    {
+        d->curSyncFailed = true;
+    }
+    else
+    {
+        d->curSyncWrote = true;
+    }
+
+    finishSyncAsset(d->curSyncWrote);
+}
+
+void ImmichWindow::finishSyncAsset(bool wrote)
+{
+    const Private::SyncJob job = d->syncJobs.at(d->syncIndex);
+
+    if (d->curSyncFailed)
+    {
+        ++d->syncFailed;
+    }
+    else
+    {
+        if (wrote)
+        {
+            ++d->syncUpdated;
+        }
+        else
+        {
+            ++d->syncClean;
+        }
+
+        // Snapshot the post-sync state: server fields as they
+        // now stand (its prior values with our plan applied).
+        SyncFields after = d->curServer.fields;
+
+        if (d->curPlan.setRating)
+        {
+            after.rating = d->curPlan.rating;
+        }
+
+        if (d->curPlan.setDescription)
+        {
+            after.description = d->curPlan.description;
+        }
+
+        if (d->curPlan.setGps)
+        {
+            after.hasGps    = true;
+            after.latitude  = d->curPlan.latitude;
+            after.longitude = d->curPlan.longitude;
+        }
+
+        for (const QString& tag : d->curPlan.tagsToAdd)
+        {
+            if (!after.tags.contains(tag))
+            {
+                after.tags << tag;
+            }
+        }
+
+        storeSnapshot(job.assetId, after, d->curServer.updatedAt,
+                      d->curServer.checksum, job.dk);
+    }
+
+    advanceSyncAsset();
+}
+
+void ImmichWindow::advanceSyncAsset()
+{
+    ++d->syncIndex;
+    nextSyncAsset();
+}
+
+void ImmichWindow::startSyncTags()
+{
+    if (d->syncAborted || d->syncTagAdds.isEmpty())
+    {
+        finishSync();
+        return;
+    }
+
+    d->tagsPurpose = Private::TagsPurpose::Sync;
+    d->status->setText(QStringLiteral("Syncing tags..."));
+    d->talker->listTags();
+}
+
+void ImmichWindow::handleSyncTagList(const QList<ImmichTag>& tags)
+{
+    if (!d->syncing)
+    {
+        return;
+    }
+
+    for (const ImmichTag& tag : tags)
+    {
+        d->syncTagIds.insert(tag.name, tag.id);
+    }
+
+    d->syncTagsToCreate.clear();
+
+    for (auto it = d->syncTagAdds.constBegin(); it != d->syncTagAdds.constEnd(); ++it)
+    {
+        if (!d->syncTagIds.contains(it.key()))
+        {
+            d->syncTagsToCreate.append(it.key());
+        }
+    }
+
+    nextTagCreate();
+}
+
+void ImmichWindow::nextTagCreate()
+{
+    if (!d->syncTagsToCreate.isEmpty())
+    {
+        d->talker->createTag(d->syncTagsToCreate.constFirst());
+        return;
+    }
+
+    d->syncBulkQueue.clear();
+
+    for (auto it = d->syncTagAdds.constBegin(); it != d->syncTagAdds.constEnd(); ++it)
+    {
+        const QString id = d->syncTagIds.value(it.key());
+
+        if (!id.isEmpty())
+        {
+            d->syncBulkQueue.append(qMakePair(id, it.value()));
+        }
+    }
+
+    applyNextBulkTag();
+}
+
+void ImmichWindow::slotTagCreated(const QString& name, const QString& id, int httpStatus)
+{
+    if (!d->syncing)
+    {
+        return;
+    }
+
+    d->syncTagsToCreate.removeAll(name);
+
+    if (httpStatus == 403)
+    {
+        d->syncPermsDenied = true;
+        d->syncAborted     = true;
+        finishSync();
+        return;
+    }
+
+    if (id.isEmpty() || httpStatus < 200 || httpStatus >= 300)
+    {
+        ++d->syncFailed;
+    }
+    else
+    {
+        d->syncTagIds.insert(name, id);
+    }
+
+    nextTagCreate();
+}
+
+void ImmichWindow::applyNextBulkTag()
+{
+    if (d->syncBulkQueue.isEmpty())
+    {
+        finishSync();
+        return;
+    }
+
+    const QPair<QString, QStringList> item = d->syncBulkQueue.constFirst();
+    d->talker->bulkTagAssets(item.first, item.second);
+}
+
+void ImmichWindow::slotBulkTagged(const QString& /*tagId*/, int httpStatus)
+{
+    if (!d->syncing)
+    {
+        return;
+    }
+
+    if (!d->syncBulkQueue.isEmpty())
+    {
+        d->syncBulkQueue.removeFirst();
+    }
+
+    if (httpStatus == 403)
+    {
+        d->syncPermsDenied = true;
+        d->syncAborted     = true;
+        finishSync();
+        return;
+    }
+
+    if (httpStatus < 200 || httpStatus >= 300)
+    {
+        ++d->syncFailed;
+    }
+
+    applyNextBulkTag();
+}
+
+void ImmichWindow::finishSync()
+{
+    d->syncing = false;
+    d->syncJobs.clear();
+    d->syncTagAdds.clear();
+    d->syncBulkQueue.clear();
+    printUploadSummary();
+}
+
+void ImmichWindow::storeSnapshot(const QString& assetId, const SyncFields& serverFields,
+                                 const QString& serverUpdatedAt, const QString& checksum,
+                                 const SyncFields& dkFields)
+{
+    SyncSnapshot snap;
+    snap.checksum        = checksum;
+    snap.serverUpdatedAt = serverUpdatedAt;
+    snap.serverHash      = syncFieldHash(serverFields);
+    snap.dkHash          = syncFieldHash(dkFields);
+    d->syncState.insert(assetId, snap.toJson());
+    saveSyncState(d->syncStatePath, d->syncState);
+}
+
+SyncFields ImmichWindow::dkFieldsFor(const QUrl& url) const
+{
+    SyncFields fields;
+
+    if (!d->iface)
+    {
+        return fields;
+    }
+
+    const DItemInfo item(d->iface->itemInfo(url));
+    fields.tags        = item.tagsPath();
+    fields.rating      = (item.rating() >= 1 && item.rating() <= 5) ? item.rating() : 0;
+    fields.description = item.comment();
+
+    if (item.hasGeolocationInfo())
+    {
+        fields.hasGps    = true;
+        fields.latitude  = item.latitude();
+        fields.longitude = item.longitude();
+    }
+
+    return fields;
 }
 
 void ImmichWindow::slotDownloadAlbum()
@@ -1590,13 +2100,23 @@ void ImmichWindow::slotAssetRecord(const QString& assetId, const QString& target
                                    const QJsonObject& record)
 {
     writeRecordSidecar(targetFile, record);
+
+    // Post-pull snapshot: digiKam now holds the server's fields.
+    const ServerFields sv = serverFieldsFromRecord(record);
+    storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.checksum, sv.fields);
+
     slotDownloadFinished(assetId, true);
 }
 
 void ImmichWindow::slotMetaRecord(const QString& assetId, const QString& targetFile,
                                   const QJsonObject& record)
 {
-    slotMetaFinished(assetId, writeRecordSidecar(targetFile, record));
+    const bool updated = writeRecordSidecar(targetFile, record);
+
+    const ServerFields sv = serverFieldsFromRecord(record);
+    storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.checksum, sv.fields);
+
+    slotMetaFinished(assetId, updated);
 }
 
 bool ImmichWindow::writeRecordSidecar(const QString& targetFile, const QJsonObject& record)
@@ -1641,13 +2161,25 @@ bool ImmichWindow::writeRecordSidecar(const QString& targetFile, const QJsonObje
 
     if (!tags.isEmpty() || rating != 0 || !description.isEmpty() || hasGps)
     {
-        const QString packet = buildSidecarPacket(tags, rating, description, hasGps,
-                                                  lat.toDouble(), lon.toDouble());
-        QFile         file(targetFile + QStringLiteral(".xmp"));
+        const QString   packet = buildSidecarPacket(tags, rating, description, hasGps,
+                                                    lat.toDouble(), lon.toDouble());
+        const QByteArray bytes = packet.toUtf8();
+
+        // Already current: leave the local sidecar (and its
+        // timestamp) untouched, and report "not updated".
+        QFile existing(targetFile + QStringLiteral(".xmp"));
+
+        if (existing.open(QIODevice::ReadOnly) && existing.readAll() == bytes)
+        {
+            return false;
+        }
+
+        existing.close();
+        QFile file(targetFile + QStringLiteral(".xmp"));
 
         if (file.open(QIODevice::WriteOnly))
         {
-            return file.write(packet.toUtf8()) == packet.toUtf8().size();
+            return file.write(bytes) == bytes.size();
         }
     }
 
@@ -1739,6 +2271,16 @@ void ImmichWindow::slotError(const QString& msg)
         d->checking = false;
         d->status->setText(QStringLiteral("Duplicate check failed (%1); uploading everything.").arg(msg));
         nextUpload();
+        return;
+    }
+
+    if (d->tagsPurpose == Private::TagsPurpose::Sync)
+    {
+        // The sync's tag list could not be fetched: treat it as
+        // empty so the sync chain completes (creations will be
+        // attempted and counted) instead of stalling.
+        d->tagsPurpose = Private::TagsPurpose::Ui;
+        handleSyncTagList(QList<ImmichTag>());
         return;
     }
 
@@ -1843,7 +2385,11 @@ QString ImmichWindow::sidecarFor(const QUrl& url, const QString& filePath)
     {
         const DItemInfo item(d->iface->itemInfo(url));
         const QStringList tags    = item.tagsPath();
-        const int         rating  = item.rating();
+        // digiKam reports an unset rating as -1; passing that
+        // through would write xmp:Rating -1, which Immich reads
+        // as "rejected". Only a real 1..5 rating is a rating.
+        const int         rating  = (item.rating() >= 1 && item.rating() <= 5)
+                                        ? item.rating() : 0;
         const QString     comment = item.comment();
         const bool        hasGps  = item.hasGeolocationInfo();
 

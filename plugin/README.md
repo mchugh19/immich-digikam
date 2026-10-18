@@ -36,6 +36,20 @@ digiKam's own web-service plugins (Piwigo in particular).
   sidecar, or one generated from the Immich asset record:
   tags, rating, caption, GPS), so metadata changes made in
   Immich still reach digiKam on a re-download.
+- Metadata sync on export: a selected file the server
+  already has (checksum match) is not re-uploaded, but its
+  digiKam tags, rating, caption and GPS are diffed against
+  the server's asset record and only the differences are
+  written through the API (PUT /assets, the tags endpoints).
+  Tag sync is add-only: a tag removed in digiKam is not
+  removed in Immich, and a tag set in Immich is never deleted
+  by an export. Per-asset snapshots of the last sync are
+  kept (in digiKam's app data, immich-sync-state.json): when
+  both sides changed a photo's scalars since then, the newer
+  change wins by timestamp and the run reports it as a
+  conflict; when only Immich changed, the export leaves the
+  asset alone. Import refreshes write a local sidecar only
+  when its content actually differs.
 - Both transfers run item by item with a progress bar and a
   summary (done / skipped / failed counts).
 - Caching: thumbnails (album covers and contents previews)
@@ -50,6 +64,10 @@ digiKam's own web-service plugins (Piwigo in particular).
 Tested against Immich 3.3.3. The API key needs these permissions:
 `asset.upload`, `asset.read`, `asset.view`, `asset.download`,
 `album.read`, `album.create`, `albumAsset.create`, `tag.read`.
+The export metadata sync additionally needs `asset.update`,
+`tag.create` and `tag.asset`; without them the sync is refused
+by the server and the run's summary says so (uploads and
+downloads are unaffected).
 
 ## Build
 

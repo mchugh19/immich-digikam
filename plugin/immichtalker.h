@@ -50,6 +50,11 @@ class ImmichSession;
  *   POST /assets/bulk-upload-check  which of a set of SHA-1
  *                                   checksums the server already
  *                                   has (action reject = duplicate)
+ *   PUT  /assets/<id>               metadata sync (rating,
+ *                                   description, GPS) for an
+ *                                   already-uploaded asset
+ *   POST /tags                      create a tag
+ *   PUT  /tags/assets               assign a tag to assets
  *
  * Authentication is the x-api-key header on every request.
  */
@@ -116,6 +121,28 @@ public:
      */
     void checkUploads(const QMap<QString, QString>& checksumsByPath);
 
+    /** Fetch one asset's record for the metadata sync.
+     * Emits signalSyncRecord with the HTTP status (0 on a
+     * network-level failure).
+     */
+    void fetchAssetForSync(const QString& assetId);
+
+    /** Apply metadata changes to an existing asset
+     * (PUT /assets/<id>). Emits signalAssetPatched with the
+     * HTTP status.
+     */
+    void updateAsset(const QString& assetId, const QJsonObject& body);
+
+    /** Create a tag by value. Emits signalTagCreated with the
+     * new tag's id (empty on failure) and the HTTP status.
+     */
+    void createTag(const QString& name);
+
+    /** Assign one tag to a set of assets (PUT /tags/assets).
+     * Emits signalBulkTagged with the HTTP status.
+     */
+    void bulkTagAssets(const QString& tagId, const QStringList& assetIds);
+
     void cancel();
 
 Q_SIGNALS:
@@ -147,6 +174,10 @@ Q_SIGNALS:
     void signalMetaRecord(const QString& assetId, const QString& targetFile,
                           const QJsonObject& record);
     void signalUploadCheck(const QMap<QString, QString>& duplicatesByPath);
+    void signalSyncRecord(const QString& assetId, const QJsonObject& record, int httpStatus);
+    void signalAssetPatched(const QString& assetId, int httpStatus);
+    void signalTagCreated(const QString& name, const QString& id, int httpStatus);
+    void signalBulkTagged(const QString& tagId, int httpStatus);
 
 private Q_SLOTS:
 
