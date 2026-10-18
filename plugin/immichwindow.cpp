@@ -379,7 +379,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->uploadBtn        = new QPushButton(QStringLiteral("Upload selection"));
     d->downloadBtn      = new QPushButton(QStringLiteral("Download"));
     d->cancelBtn        = new QPushButton(QStringLiteral("Cancel transfer"));
-    d->cancelBtn->setVisible(false);
+    d->cancelBtn->setEnabled(false);
 
     // Standard theme icons, the ones digiKam's own dialogs use
     // for the same actions, so the window sits naturally in the
@@ -455,7 +455,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->albumRadio->setChecked(d->session->exportTargetMode() == QStringLiteral("album"));
     d->libraryRadio->setChecked(!d->albumRadio->isChecked());
     d->progress         = new QProgressBar;
-    d->progress->setVisible(false);
+    d->progress->setFixedHeight(18);
     d->status           = new QLabel;
 
     // Each tool shows only its own direction's actions. The source
@@ -547,8 +547,15 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     layout->addWidget(d->targetLabel);
     layout->addWidget(d->uploadBtn);
     layout->addWidget(d->downloadBtn);
-    layout->addWidget(d->progress);
-    layout->addWidget(d->cancelBtn);
+
+    // The progress bar and Cancel share one always-present
+    // row: the bar stays visible (empty when idle) and Cancel
+    // is enabled only during a transfer, so starting or
+    // finishing a transfer never moves anything in the window.
+    auto* const progressRow = new QHBoxLayout;
+    progressRow->addWidget(d->progress, 1);
+    progressRow->addWidget(d->cancelBtn);
+    layout->addLayout(progressRow);
     layout->addWidget(d->status);
 
     connect(saveBtn, &QPushButton::clicked, this, &ImmichWindow::slotSaveSettings);
@@ -1294,8 +1301,7 @@ void ImmichWindow::slotUploadSelection()
     setTransferButtonsEnabled(false);
     d->progress->setRange(0, d->total);
     d->progress->setValue(0);
-    d->progress->setVisible(true);
-    d->cancelBtn->setVisible(true);
+    d->cancelBtn->setEnabled(true);
 
     // Ask the server which of these files it already has, so they
     // are skipped instead of re-uploaded.
@@ -1661,7 +1667,7 @@ void ImmichWindow::finishUpload()
 {
     d->uploading = false;
     setTransferButtonsEnabled(true);
-    d->cancelBtn->setVisible(false);
+    d->cancelBtn->setEnabled(false);
 
 
     if (!d->tempSidecar.isEmpty())
@@ -2458,7 +2464,7 @@ void ImmichWindow::slotDownloadAlbum()
     dropThumbJobs(false);
 
     setTransferButtonsEnabled(false);
-    d->cancelBtn->setVisible(true);
+    d->cancelBtn->setEnabled(true);
     d->status->setText(QStringLiteral("Listing assets..."));
 
     if (d->sourceIsTags)
@@ -2729,7 +2735,6 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
 
     d->progress->setRange(0, d->dlTotal);
     d->progress->setValue(d->dlDone);
-    d->progress->setVisible(true);
 
     continueDownloads();
 }
@@ -2922,7 +2927,7 @@ void ImmichWindow::finishDownload()
 {
     d->downloading = false;
     setTransferButtonsEnabled(true);
-    d->cancelBtn->setVisible(false);
+    d->cancelBtn->setEnabled(false);
 
     if (d->cancelling)
     {
