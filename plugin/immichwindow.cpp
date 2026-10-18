@@ -22,6 +22,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QLabel>
@@ -55,6 +56,7 @@ public:
     QLabel*       status      = nullptr;
     QPushButton*  refreshBtn  = nullptr;
     QPushButton*  uploadBtn   = nullptr;
+    QPushButton*  downloadBtn = nullptr;
     QProgressBar* progress    = nullptr;
 
     // Upload queue state.
@@ -66,6 +68,17 @@ public:
     int          done        = 0;
     int          failed      = 0;
     bool         uploading   = false;
+
+    // Download queue state.
+    QList<ImmichAssetRef> dlPending;
+    QString      dlDir;
+    int          dlTotal       = 0;
+    int          dlDone        = 0;
+    int          dlDownloaded  = 0;
+    int          dlSkipped     = 0;
+    int          dlFailed      = 0;
+    bool         downloading   = false;
+    bool         dlListing     = false;
 };
 
 ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
@@ -90,6 +103,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
     auto* const saveBtn = new QPushButton(QStringLiteral("Save settings"));
     d->refreshBtn       = new QPushButton(QStringLiteral("Refresh albums"));
     d->uploadBtn        = new QPushButton(QStringLiteral("Upload selection"));
+    d->downloadBtn      = new QPushButton(QStringLiteral("Download album"));
     d->albumList        = new QListWidget;
     d->progress         = new QProgressBar;
     d->progress->setVisible(false);
@@ -101,13 +115,17 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
     layout->addWidget(d->refreshBtn);
     layout->addWidget(d->albumList);
     layout->addWidget(d->uploadBtn);
+    layout->addWidget(d->downloadBtn);
     layout->addWidget(d->progress);
     layout->addWidget(d->status);
 
     connect(saveBtn, &QPushButton::clicked, this, &ImmichWindow::slotSaveSettings);
     connect(d->refreshBtn, &QPushButton::clicked, this, &ImmichWindow::slotRefreshAlbums);
     connect(d->uploadBtn, &QPushButton::clicked, this, &ImmichWindow::slotUploadSelection);
+    connect(d->downloadBtn, &QPushButton::clicked, this, &ImmichWindow::slotDownloadAlbum);
     connect(d->talker, &ImmichTalker::signalAlbums, this, &ImmichWindow::slotAlbums);
+    connect(d->talker, &ImmichTalker::signalAlbumAssets, this, &ImmichWindow::slotAlbumAssets);
+    connect(d->talker, &ImmichTalker::signalDownloadFinished, this, &ImmichWindow::slotDownloadFinished);
     connect(d->talker, &ImmichTalker::signalAlbumUpdated, this, &ImmichWindow::slotAlbumUpdated);
     connect(d->talker, &ImmichTalker::signalUploadSucceeded, this, &ImmichWindow::slotUploadSucceeded);
     connect(d->talker, &ImmichTalker::signalError, this, &ImmichWindow::slotError);
@@ -157,7 +175,7 @@ void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
 
 void ImmichWindow::slotUploadSelection()
 {
-    if (d->uploading)
+    if (d->uploading || d->downloading)
     {
         return;
     }
@@ -187,6 +205,7 @@ void ImmichWindow::slotUploadSelection()
 
     d->refreshBtn->setEnabled(false);
     d->uploadBtn->setEnabled(false);
+    d->downloadBtn->setEnabled(false);
     d->progress->setRange(0, d->total);
     d->progress->setValue(0);
     d->progress->setVisible(true);
@@ -243,6 +262,7 @@ void ImmichWindow::finishUpload()
     d->uploading = false;
     d->refreshBtn->setEnabled(true);
     d->uploadBtn->setEnabled(true);
+    d->downloadBtn->setEnabled(true);
 
     if (!d->tempSidecar.isEmpty())
     {
@@ -272,8 +292,153 @@ void ImmichWindow::slotAlbumUpdated()
                            .arg(d->failed));
 }
 
+void ImmichWindow::slotDownloadAlbum()
+{
+    if (d->uploading || d->downloading)
+    {
+        return;
+    }
+
+    d->session->setUrl(d->urlEdit->text());
+    d->session->setApiKey(d->keyEdit->text());
+
+    QListWidgetItem* const albumItem = d->albumList->currentItem();
+
+    if (!albumItem)
+    {
+        d->status->setText(QStringLiteral("Select an album to download."));
+        return;
+    }
+
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, QStringLiteral("Download album to"), QDir::homePath());
+
+    if (dir.isEmpty())
+    {
+        return;
+    }
+
+    d->dlDir         = dir;
+    d->dlPending.clear();
+    d->dlTotal       = 0;
+    d->dlDone        = 0;
+    d->dlDownloaded  = 0;
+    d->dlSkipped     = 0;
+    d->dlFailed      = 0;
+    d->downloading   = true;
+    d->dlListing     = true;
+
+    d->refreshBtn->setEnabled(false);
+    d->uploadBtn->setEnabled(false);
+    d->downloadBtn->setEnabled(false);
+    d->status->setText(QStringLiteral("Listing album assets..."));
+
+    d->talker->listAlbumAssets(albumItem->data(Qt::UserRole).toString());
+}
+
+void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
+{
+    d->dlListing = false;
+    d->dlTotal   = assets.size();
+
+    for (const ImmichAssetRef& asset : assets)
+    {
+        if (asset.fileName.isEmpty())
+        {
+            ++d->dlFailed;
+            ++d->dlDone;
+        }
+        else if (QFileInfo::exists(d->dlDir + QLatin1Char('/') + asset.fileName))
+        {
+            ++d->dlSkipped;
+            ++d->dlDone;
+        }
+        else
+        {
+            d->dlPending.append(asset);
+        }
+    }
+
+    d->progress->setRange(0, d->dlTotal);
+    d->progress->setValue(d->dlDone);
+    d->progress->setVisible(true);
+
+    if (d->dlPending.isEmpty())
+    {
+        finishDownload();
+        return;
+    }
+
+    nextDownload();
+}
+
+void ImmichWindow::nextDownload()
+{
+    const ImmichAssetRef asset = d->dlPending.takeFirst();
+
+    d->status->setText(QStringLiteral("Downloading %1 (%2 of %3)")
+                           .arg(asset.fileName)
+                           .arg(d->dlDone + 1)
+                           .arg(d->dlTotal));
+
+    d->talker->downloadAsset(asset.id, d->dlDir + QLatin1Char('/') + asset.fileName);
+}
+
+void ImmichWindow::slotDownloadFinished(const QString& /*assetId*/, bool ok)
+{
+    if (!d->downloading)
+    {
+        return;
+    }
+
+    if (ok)
+    {
+        ++d->dlDownloaded;
+    }
+    else
+    {
+        ++d->dlFailed;
+    }
+
+    ++d->dlDone;
+    d->progress->setValue(d->dlDone);
+
+    if (d->dlPending.isEmpty())
+    {
+        finishDownload();
+        return;
+    }
+
+    nextDownload();
+}
+
+void ImmichWindow::finishDownload()
+{
+    d->downloading = false;
+    d->refreshBtn->setEnabled(true);
+    d->uploadBtn->setEnabled(true);
+    d->downloadBtn->setEnabled(true);
+
+    d->status->setText(QStringLiteral("Downloaded %1 assets (%2 already on disk, %3 failed) to %4")
+                           .arg(d->dlDownloaded)
+                           .arg(d->dlSkipped)
+                           .arg(d->dlFailed)
+                           .arg(d->dlDir));
+}
+
 void ImmichWindow::slotError(const QString& msg)
 {
+    if (d->dlListing)
+    {
+        d->dlListing   = false;
+        d->downloading = false;
+        d->refreshBtn->setEnabled(true);
+        d->uploadBtn->setEnabled(true);
+        d->downloadBtn->setEnabled(true);
+        d->status->setText(msg);
+        return;
+    }
+
     if (d->uploading)
     {
         // One bad file must not stall the batch.
@@ -290,7 +455,7 @@ void ImmichWindow::slotError(const QString& msg)
 
 void ImmichWindow::slotBusy(bool val)
 {
-    if (!d->uploading)
+    if (!d->uploading && !d->downloading)
     {
         d->refreshBtn->setEnabled(!val);
     }

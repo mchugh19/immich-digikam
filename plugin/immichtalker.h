@@ -43,6 +43,9 @@ class ImmichSession;
  *   POST /search/metadata           an album's assets (3.x does not
  *                                   embed them in the album record)
  *   GET  /assets/<id>               one asset's full record
+ *   GET  /assets/<id>/original      download the original file
+ *   GET  /assets/<id>/sidecar       download its XMP sidecar (404
+ *                                   when the asset has none)
  *
  * Authentication is the x-api-key header on every request.
  */
@@ -66,6 +69,17 @@ public:
      */
     void uploadAsset(const QString& filePath, const QString& sidecarPath = QString());
 
+    /** List the assets of one album (id + original file name). */
+    void listAlbumAssets(const QString& albumId);
+
+    /**
+     * Download one asset's original to targetPath, followed by its
+     * sidecar to targetPath + ".xmp" when the server has one.
+     * Emits signalDownloadFinished either way; the download only
+     * fails when the original itself cannot be fetched or written.
+     */
+    void downloadAsset(const QString& assetId, const QString& targetPath);
+
     void cancel();
 
 Q_SIGNALS:
@@ -76,6 +90,8 @@ Q_SIGNALS:
     void signalAlbumCreated(const ImmichAlbum& album);
     void signalAlbumUpdated();
     void signalUploadSucceeded(const QString& assetId, const QString& status);
+    void signalAlbumAssets(const QList<ImmichAssetRef>& assets);
+    void signalDownloadFinished(const QString& assetId, bool ok);
 
 private Q_SLOTS:
 

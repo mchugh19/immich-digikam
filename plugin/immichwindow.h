@@ -41,12 +41,14 @@ class ImmichTalker;
 
 /**
  * Tool dialog: connection settings (server URL + API key), the
- * server's album list, and the push action. Upload sends the
+ * server's album list, and the transfer actions. Upload sends the
  * items currently selected in digiKam, each with its XMP sidecar:
  * an on-disk sidecar when one exists next to the file, otherwise
  * the file's embedded XMP packet written to a temporary sidecar.
  * When an album is selected in the list, the uploaded items are
- * added to it.
+ * added to it. Download writes the selected album's originals and
+ * their sidecars into a chosen folder, skipping files that are
+ * already there.
  */
 class ImmichWindow : public QDialog
 {
@@ -67,6 +69,9 @@ private Q_SLOTS:
     void slotUploadSelection();
     void slotUploadSucceeded(const QString& assetId, const QString& status);
     void slotAlbumUpdated();
+    void slotDownloadAlbum();
+    void slotAlbumAssets(const QList<ImmichAssetRef>& assets);
+    void slotDownloadFinished(const QString& assetId, bool ok);
     void slotError(const QString& msg);
     void slotBusy(bool val);
 
@@ -74,6 +79,8 @@ private:
 
     void nextUpload();
     void finishUpload();
+    void nextDownload();
+    void finishDownload();
     QString sidecarFor(const QString& filePath);
 
     class Private;

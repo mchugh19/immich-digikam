@@ -41,8 +41,12 @@ public:
     QNetworkAccessManager* net     = nullptr;
 
     // What a pending reply should be parsed as when it finishes.
-    enum class Op { None, ListAlbums, CreateAlbum, AddToAlbum, Upload };
+    enum class Op { None, ListAlbums, CreateAlbum, AddToAlbum, Upload,
+                    AlbumAssets, DownloadOriginal, DownloadSidecar };
     QHash<QNetworkReply*, Op> ops;
+
+    // Download context per reply: asset id and destination path.
+    QHash<QNetworkReply*, QPair<QString, QString> > downloadCtx;
 };
 
 ImmichTalker::ImmichTalker(ImmichSession* const session, QObject* const parent)
@@ -193,6 +197,31 @@ void ImmichTalker::uploadAsset(const QString& filePath, const QString& sidecarPa
     Q_EMIT signalBusy(true);
 }
 
+void ImmichTalker::listAlbumAssets(const QString& albumId)
+{
+    // One large page instead of following nextPage: albums beyond
+    // a thousand assets are out of scope for the current pull.
+    const QJsonObject obj {
+        { QStringLiteral("albumIds"), QJsonArray { albumId } },
+        { QStringLiteral("size"),     1000 }
+    };
+
+    QNetworkRequest req = makeRequest(QStringLiteral("/search/metadata"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
+    d->ops.insert(reply, Private::Op::AlbumAssets);
+    Q_EMIT signalBusy(true);
+}
+
+void ImmichTalker::downloadAsset(const QString& assetId, const QString& targetPath)
+{
+    QNetworkReply* const reply = d->net->get(
+        makeRequest(QStringLiteral("/assets/%1/original").arg(assetId)));
+    d->ops.insert(reply, Private::Op::DownloadOriginal);
+    d->downloadCtx.insert(reply, qMakePair(assetId, targetPath));
+    Q_EMIT signalBusy(true);
+}
+
 void ImmichTalker::cancel()
 {
     for (QNetworkReply* const reply : d->ops.keys())
@@ -204,7 +233,65 @@ void ImmichTalker::cancel()
 void ImmichTalker::slotFinished(QNetworkReply* reply)
 {
     const Private::Op op = d->ops.take(reply);
+    const QPair<QString, QString> ctx = d->downloadCtx.take(reply);
     Q_EMIT signalBusy(false);
+
+    if (op == Private::Op::DownloadOriginal || op == Private::Op::DownloadSidecar)
+    {
+        const QString& assetId    = ctx.first;
+        const QString& targetPath = ctx.second;
+        const int httpStatus      = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray body     = (reply->error() == QNetworkReply::NoError) ? reply->readAll()
+                                                                               : QByteArray();
+        const bool failed         = (reply->error() != QNetworkReply::NoError) && httpStatus != 404;
+        reply->deleteLater();
+
+        if (op == Private::Op::DownloadSidecar)
+        {
+            // The original is already on disk; a missing (404) or
+            // unfetchable sidecar does not fail the download.
+            if (!failed && httpStatus == 200 && !body.isEmpty())
+            {
+                QFile file(targetPath);
+                if (file.open(QIODevice::WriteOnly))
+                {
+                    file.write(body);
+                }
+            }
+
+            Q_EMIT signalDownloadFinished(assetId, true);
+            return;
+        }
+
+        if (failed)
+        {
+            Q_EMIT signalDownloadFinished(assetId, false);
+            return;
+        }
+
+        bool written = false;
+        {
+            QFile file(targetPath);
+            if (file.open(QIODevice::WriteOnly))
+            {
+                written = (file.write(body) == body.size());
+            }
+        }
+
+        if (!written)
+        {
+            Q_EMIT signalDownloadFinished(assetId, false);
+            return;
+        }
+
+        // Chain the sidecar fetch for the asset just written.
+        QNetworkReply* const sidecarReply = d->net->get(
+            makeRequest(QStringLiteral("/assets/%1/sidecar").arg(assetId)));
+        d->ops.insert(sidecarReply, Private::Op::DownloadSidecar);
+        d->downloadCtx.insert(sidecarReply, qMakePair(assetId, targetPath + QStringLiteral(".xmp")));
+        Q_EMIT signalBusy(true);
+        return;
+    }
 
     if (reply->error() != QNetworkReply::NoError)
     {
@@ -256,6 +343,26 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
             break;
         }
 
+        case Private::Op::AlbumAssets:
+        {
+            QList<ImmichAssetRef> assets;
+            const QJsonArray items = doc.object()
+                                         .value(QStringLiteral("assets")).toObject()
+                                         .value(QStringLiteral("items")).toArray();
+            for (const QJsonValue& val : items)
+            {
+                const QJsonObject obj = val.toObject();
+                ImmichAssetRef asset;
+                asset.id       = obj.value(QStringLiteral("id")).toString();
+                asset.fileName = obj.value(QStringLiteral("originalFileName")).toString();
+                assets.append(asset);
+            }
+            Q_EMIT signalAlbumAssets(assets);
+            break;
+        }
+
+        case Private::Op::DownloadOriginal:
+        case Private::Op::DownloadSidecar:
         case Private::Op::None:
             break;
     }

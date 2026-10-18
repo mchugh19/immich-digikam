@@ -28,6 +28,13 @@ struct ImmichAlbum
     int     assetCount = 0;
 };
 
+/** One asset of an album, as listed by POST /search/metadata. */
+struct ImmichAssetRef
+{
+    QString id;
+    QString fileName;
+};
+
 } // namespace DigikamGenericImmichPlugin
 
 #endif // DIGIKAM_IMMICH_ITEM_H
