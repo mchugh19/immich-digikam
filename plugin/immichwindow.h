@@ -95,6 +95,9 @@ private Q_SLOTS:
     void slotDownloadFinished(const QString& assetId, bool ok);
     void slotAssetRecord(const QString& assetId, const QString& targetFile,
                          const QJsonObject& record);
+    void slotMetaFinished(const QString& assetId, bool updated);
+    void slotMetaRecord(const QString& assetId, const QString& targetFile,
+                        const QJsonObject& record);
     void slotCancelTransfer();
     void slotError(const QString& msg);
     void slotBusy(bool val);
@@ -109,6 +112,9 @@ private:
     void nextUpload();
     void finishUpload();
     void nextDownload();
+    void continueDownloads();
+    void nextMeta();
+    bool writeRecordSidecar(const QString& targetFile, const QJsonObject& record);
     void finishDownload();
     QString sidecarFor(const QUrl& url, const QString& filePath);
 

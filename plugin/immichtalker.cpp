@@ -43,7 +43,8 @@ public:
     // What a pending reply should be parsed as when it finishes.
     enum class Op { None, ListAlbums, ListTags, CreateAlbum, AddToAlbum, Upload,
                     AlbumAssets, DownloadOriginal, DownloadSidecar,
-                    DownloadRecord, BulkCheck, Thumbnail };
+                    DownloadRecord, MetaSidecar, MetaRecord,
+                    BulkCheck, Thumbnail };
     QHash<QNetworkReply*, Op> ops;
 
     // Download context per reply: asset id and destination path.
@@ -268,6 +269,15 @@ void ImmichTalker::fetchListingPage(int page)
     Q_EMIT signalBusy(true);
 }
 
+void ImmichTalker::downloadSidecarOnly(const QString& assetId, const QString& targetPath)
+{
+    QNetworkReply* const reply = d->net->get(
+        makeRequest(QStringLiteral("/assets/%1/sidecar").arg(assetId)));
+    d->ops.insert(reply, Private::Op::MetaSidecar);
+    d->downloadCtx.insert(reply, qMakePair(assetId, targetPath + QStringLiteral(".xmp")));
+    Q_EMIT signalBusy(true);
+}
+
 void ImmichTalker::downloadAsset(const QString& assetId, const QString& targetPath)
 {
     QNetworkReply* const reply = d->net->get(
@@ -312,7 +322,8 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
     const QPair<QString, QString> ctx = d->downloadCtx.take(reply);
     Q_EMIT signalBusy(false);
 
-    if (op == Private::Op::DownloadOriginal || op == Private::Op::DownloadSidecar)
+    if (op == Private::Op::DownloadOriginal || op == Private::Op::DownloadSidecar
+        || op == Private::Op::MetaSidecar)
     {
         const QString& assetId    = ctx.first;
         const QString& targetPath = ctx.second;
@@ -321,6 +332,44 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
                                                                                : QByteArray();
         const bool failed         = (reply->error() != QNetworkReply::NoError) && httpStatus != 404;
         reply->deleteLater();
+
+        if (op == Private::Op::MetaSidecar)
+        {
+            // Metadata-only refresh of an existing file. A network
+            // failure (including an abort) ends it quietly; a 404
+            // falls through to the asset record for generation.
+            if (failed)
+            {
+                Q_EMIT signalMetaFinished(assetId, false);
+                return;
+            }
+
+            bool sidecarWritten = false;
+
+            if (httpStatus == 200 && !body.isEmpty())
+            {
+                QFile file(targetPath);
+
+                if (file.open(QIODevice::WriteOnly))
+                {
+                    sidecarWritten = (file.write(body) == body.size());
+                }
+            }
+
+            if (sidecarWritten)
+            {
+                Q_EMIT signalMetaFinished(assetId, true);
+                return;
+            }
+
+            const QString originalPath = targetPath.left(targetPath.size() - 4);   // strip ".xmp"
+            QNetworkReply* const recordReply = d->net->get(
+                makeRequest(QStringLiteral("/assets/%1").arg(assetId)));
+            d->ops.insert(recordReply, Private::Op::MetaRecord);
+            d->downloadCtx.insert(recordReply, qMakePair(assetId, originalPath));
+            Q_EMIT signalBusy(true);
+            return;
+        }
 
         if (op == Private::Op::DownloadSidecar)
         {
@@ -393,6 +442,25 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
                                                                             : QByteArray();
         reply->deleteLater();
         Q_EMIT signalThumbnail(assetId, bytes);
+        return;
+    }
+
+    if (op == Private::Op::MetaRecord)
+    {
+        const QJsonObject record = (reply->error() == QNetworkReply::NoError)
+                                       ? QJsonDocument::fromJson(reply->readAll()).object()
+                                       : QJsonObject();
+        reply->deleteLater();
+
+        if (!record.isEmpty())
+        {
+            Q_EMIT signalMetaRecord(ctx.first, ctx.second, record);
+        }
+        else
+        {
+            Q_EMIT signalMetaFinished(ctx.first, false);
+        }
+
         return;
     }
 

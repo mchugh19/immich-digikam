@@ -109,6 +109,13 @@ public:
     int                   previewGen     = 0;
     bool                  thumbInFlight  = false;
 
+    // Metadata refresh queue for files skipped as already on
+    // disk: (asset id, local target path).
+    QList<QPair<QString, QString>> metaPending;
+    int          metaTotal     = 0;
+    int          metaDone      = 0;
+    int          metaUpdated   = 0;
+
     // Download queue state.
     QList<ImmichAssetRef> dlPending;
     QString      dlDir;
@@ -247,6 +254,8 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     connect(d->talker, &ImmichTalker::signalAlbumAssets, this, &ImmichWindow::slotAlbumAssets);
     connect(d->talker, &ImmichTalker::signalDownloadFinished, this, &ImmichWindow::slotDownloadFinished);
     connect(d->talker, &ImmichTalker::signalAssetRecord, this, &ImmichWindow::slotAssetRecord);
+    connect(d->talker, &ImmichTalker::signalMetaFinished, this, &ImmichWindow::slotMetaFinished);
+    connect(d->talker, &ImmichTalker::signalMetaRecord, this, &ImmichWindow::slotMetaRecord);
     connect(d->talker, &ImmichTalker::signalAlbumUpdated, this, &ImmichWindow::slotAlbumUpdated);
     connect(d->talker, &ImmichTalker::signalUploadSucceeded, this, &ImmichWindow::slotUploadSucceeded);
     connect(d->talker, &ImmichTalker::signalUploadCheck, this, &ImmichWindow::slotUploadCheck);
@@ -591,6 +600,7 @@ void ImmichWindow::slotCancelTransfer()
     d->cancelling = true;
     d->pending.clear();
     d->dlPending.clear();
+    d->metaPending.clear();
     d->status->setText(QStringLiteral("Cancelling..."));
     d->talker->cancel();
 }
@@ -694,6 +704,10 @@ void ImmichWindow::slotDownloadAlbum()
 
     d->dlDir         = dir;
     d->dlPending.clear();
+    d->metaPending.clear();
+    d->metaTotal     = 0;
+    d->metaDone      = 0;
+    d->metaUpdated   = 0;
     d->dlTotal       = 0;
     d->dlDone        = 0;
     d->dlDownloaded  = 0;
@@ -882,10 +896,11 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
 
         if (!claimed.contains(name) && QFileInfo::exists(d->dlDir + QLatin1Char('/') + name))
         {
-            // Already downloaded by an earlier run.
+            // Already downloaded by an earlier run: skip the file,
+            // but queue a metadata refresh so Immich-side tag,
+            // rating or caption changes still reach digiKam.
             claimed.insert(name);
-            ++d->dlSkipped;
-            ++d->dlDone;
+            d->metaPending.append(qMakePair(asset.id, d->dlDir + QLatin1Char('/') + name));
             continue;
         }
 
@@ -903,8 +918,7 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
             if (QFileInfo::exists(d->dlDir + QLatin1Char('/') + name))
             {
                 claimed.insert(name);
-                ++d->dlSkipped;
-                ++d->dlDone;
+                d->metaPending.append(qMakePair(asset.id, d->dlDir + QLatin1Char('/') + name));
                 continue;
             }
         }
@@ -915,17 +929,67 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
         d->dlPending.append(target);
     }
 
+    d->metaTotal = d->metaPending.size();
+
     d->progress->setRange(0, d->dlTotal);
     d->progress->setValue(d->dlDone);
     d->progress->setVisible(true);
 
-    if (d->dlPending.isEmpty())
+    continueDownloads();
+}
+
+void ImmichWindow::continueDownloads()
+{
+    if (!d->dlPending.isEmpty())
+    {
+        nextDownload();
+        return;
+    }
+
+    if (!d->metaPending.isEmpty())
+    {
+        nextMeta();
+        return;
+    }
+
+    finishDownload();
+}
+
+void ImmichWindow::nextMeta()
+{
+    const QPair<QString, QString> item = d->metaPending.takeFirst();
+
+    d->status->setText(QStringLiteral("Refreshing metadata for existing files (%1 of %2)")
+                           .arg(d->metaDone + 1)
+                           .arg(d->metaTotal));
+
+    d->talker->downloadSidecarOnly(item.first, item.second);
+}
+
+void ImmichWindow::slotMetaFinished(const QString& /*assetId*/, bool updated)
+{
+    if (d->cancelling)
     {
         finishDownload();
         return;
     }
 
-    nextDownload();
+    if (!d->downloading)
+    {
+        return;
+    }
+
+    if (updated)
+    {
+        ++d->metaUpdated;
+    }
+
+    ++d->dlSkipped;
+    ++d->dlDone;
+    ++d->metaDone;
+    d->progress->setValue(d->dlDone);
+
+    continueDownloads();
 }
 
 void ImmichWindow::nextDownload()
@@ -943,11 +1007,24 @@ void ImmichWindow::nextDownload()
 void ImmichWindow::slotAssetRecord(const QString& assetId, const QString& targetFile,
                                    const QJsonObject& record)
 {
-    // The server holds no sidecar file for this asset: generate one
-    // from the Immich record so digiKam imports the tags, rating,
-    // caption and GPS together with the photo. Tag names live in the
-    // record's tags array ("value" in current servers, "name" in
-    // older ones); rating and friends live in exifInfo.
+    writeRecordSidecar(targetFile, record);
+    slotDownloadFinished(assetId, true);
+}
+
+void ImmichWindow::slotMetaRecord(const QString& assetId, const QString& targetFile,
+                                  const QJsonObject& record)
+{
+    slotMetaFinished(assetId, writeRecordSidecar(targetFile, record));
+}
+
+bool ImmichWindow::writeRecordSidecar(const QString& targetFile, const QJsonObject& record)
+{
+    // Generate a sidecar from an Immich asset record so digiKam
+    // imports the tags, rating, caption and GPS together with the
+    // photo. Tag names live in the record's tags array ("value" in
+    // current servers, "name" in older ones); rating and friends
+    // live in exifInfo. Returns false when the record carries no
+    // metadata worth writing (any local sidecar is left alone).
     const QJsonObject exif = record.value(QStringLiteral("exifInfo")).toObject();
 
     QStringList tags;
@@ -988,11 +1065,11 @@ void ImmichWindow::slotAssetRecord(const QString& assetId, const QString& target
 
         if (file.open(QIODevice::WriteOnly))
         {
-            file.write(packet.toUtf8());
+            return file.write(packet.toUtf8()) == packet.toUtf8().size();
         }
     }
 
-    slotDownloadFinished(assetId, true);
+    return false;
 }
 
 void ImmichWindow::slotDownloadFinished(const QString& /*assetId*/, bool ok)
@@ -1020,13 +1097,7 @@ void ImmichWindow::slotDownloadFinished(const QString& /*assetId*/, bool ok)
     ++d->dlDone;
     d->progress->setValue(d->dlDone);
 
-    if (d->dlPending.isEmpty())
-    {
-        finishDownload();
-        return;
-    }
-
-    nextDownload();
+    continueDownloads();
 }
 
 void ImmichWindow::finishDownload()
@@ -1044,11 +1115,18 @@ void ImmichWindow::finishDownload()
         return;
     }
 
-    d->status->setText(QStringLiteral("Downloaded %1 assets (%2 already on disk, %3 failed) to %4")
-                           .arg(d->dlDownloaded)
-                           .arg(d->dlSkipped)
-                           .arg(d->dlFailed)
-                           .arg(d->dlDir));
+    QString summary = QStringLiteral("Downloaded %1 assets (%2 already on disk, %3 failed) to %4")
+                          .arg(d->dlDownloaded)
+                          .arg(d->dlSkipped)
+                          .arg(d->dlFailed)
+                          .arg(d->dlDir);
+
+    if (d->metaUpdated > 0)
+    {
+        summary += QStringLiteral("; metadata refreshed for %1 existing files").arg(d->metaUpdated);
+    }
+
+    d->status->setText(summary);
 }
 
 void ImmichWindow::slotError(const QString& msg)

@@ -101,6 +101,14 @@ public:
     void downloadAsset(const QString& assetId, const QString& targetPath);
 
     /**
+     * Refresh only the sidecar of an asset whose file is already on
+     * disk: fetch the server sidecar, or, when there is none, the
+     * asset record (emitted as signalMetaRecord for generation).
+     * Emits signalMetaFinished either way.
+     */
+    void downloadSidecarOnly(const QString& assetId, const QString& targetPath);
+
+    /**
      * Ask the server which of the given files (local path -> base64
      * SHA-1 of the contents) it already holds. Emits
      * signalUploadCheck with the duplicates only: local path ->
@@ -129,6 +137,15 @@ Q_SIGNALS:
      */
     void signalAssetRecord(const QString& assetId, const QString& targetFile,
                            const QJsonObject& record);
+    /** A metadata-only refresh finished; updated says whether a
+     * sidecar was (re)written.
+     */
+    void signalMetaFinished(const QString& assetId, bool updated);
+    /** The record behind a metadata-only refresh, for sidecar
+     * generation (the metadata counterpart of signalAssetRecord).
+     */
+    void signalMetaRecord(const QString& assetId, const QString& targetFile,
+                          const QJsonObject& record);
     void signalUploadCheck(const QMap<QString, QString>& duplicatesByPath);
 
 private Q_SLOTS:
