@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 by Christian McHugh <mchugh19@users.noreply.github.com>
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
 // Unit tests for the plugin's pure logic: the XMP sidecar
 // builder and preservation merge (immichxmp.h) and the export
 // metadata sync planning, field hashing, snapshots and gating

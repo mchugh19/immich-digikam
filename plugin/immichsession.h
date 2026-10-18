@@ -3,12 +3,14 @@
  * This file is a part of the immich-digikam project
  * https://github.com/mchugh19/immich-digikam
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2, or (at your option) any later version.
+ * Date        : 2026-10-18
+ *
+ * SPDX-FileCopyrightText: 2026 by Christian McHugh <mchugh19@users.noreply.github.com>
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * ============================================================ */
+
 
 #ifndef DIGIKAM_IMMICH_SESSION_H
 #define DIGIKAM_IMMICH_SESSION_H

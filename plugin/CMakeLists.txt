@@ -1,4 +1,10 @@
 #
+# SPDX-FileCopyrightText: 2026 by Christian McHugh <mchugh19@users.noreply.github.com>
+#
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+
+#
 # immich-digikam: a digiKam generic plugin to sync albums with a
 # self-hosted Immich server (pull originals into digiKam, push
 # finished files back, metadata round-tripping through XMP sidecars).

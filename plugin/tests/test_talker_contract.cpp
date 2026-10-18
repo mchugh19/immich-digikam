@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 by Christian McHugh <mchugh19@users.noreply.github.com>
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
 // Contract tests for ImmichTalker against a stub HTTP server:
 // the exact request shapes the Immich API demands and the
 // response parsing the window relies on. Every API-shape bug

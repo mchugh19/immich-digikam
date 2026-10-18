@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Christian McHugh
+// SPDX-FileCopyrightText: 2026 by Christian McHugh <mchugh19@users.noreply.github.com>
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
