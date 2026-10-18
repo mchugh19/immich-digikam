@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dk-immich: photo frame with a sync badge, drawn for the
+  immich-digikam plugin. Breeze-friendly strokes (#232629) with
+  an Immich-blue accent (#3daee9).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- photo frame -->
+  <rect x="4" y="6" width="40" height="30" rx="3"
+        fill="none" stroke="#232629" stroke-width="2.5"/>
+  <!-- image glyph: sun and mountains -->
+  <circle cx="15" cy="15" r="3" fill="#3daee9"/>
+  <path d="M7 32 L19 21 L26 27 L31 23 L41 32"
+        fill="none" stroke="#232629" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- sync badge -->
+  <circle cx="36" cy="38" r="9" fill="#3daee9"/>
+  <path d="M31.5 35.2 A5 5 0 0 1 39.8 34.4 M40.5 40.8 A5 5 0 0 1 32.2 41.6"
+        fill="none" stroke="#ffffff" stroke-width="2"
+        stroke-linecap="round"/>
+  <path d="M40.3 30.9 L39.9 34.7 L36.2 34.2 Z" fill="#ffffff"/>
+  <path d="M31.7 45.1 L32.1 41.3 L35.8 41.8 Z" fill="#ffffff"/>
+</svg>

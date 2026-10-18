@@ -47,8 +47,8 @@ QString ImmichPlugin::iid() const
 
 QIcon ImmichPlugin::icon() const
 {
-    // TODO: ship a dk-immich icon set under icons/ (digiKam web
-    // service plugins use dk-<name> theme icons).
+    // Theme icon shipped as icons/dk-immich.svg (installed into
+    // the hicolor theme by the CMake install rule).
     return QIcon::fromTheme(QLatin1String("dk-immich"));
 }
 

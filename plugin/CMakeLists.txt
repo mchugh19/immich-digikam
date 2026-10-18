@@ -8,10 +8,12 @@
 # Piwigo's: server URL + API key instead of a login session, JSON
 # over HTTPS, multipart uploads with a sidecarData part.
 #
-# Status: scaffold, CMake side verified against digikam-devel
-# 9.1.0. First compile runs in a Fedora container with
-# digikam-devel installed (or Christian's Fedora toolbox, which
-# carries the same digikam 9.1.0).
+# Status: working plugin (loads in digiKam 9.1.0, album list,
+# upload and download verified against a live Immich 3.3.3).
+# Builds in a Fedora container with digikam-devel installed, or
+# in a Fedora toolbox carrying the same digikam 9.1.0; see
+# README.md in this directory for the recipes and the
+# DK_PLUGIN_PATH warning.
 #
 
 cmake_minimum_required(VERSION 3.16)
@@ -52,3 +54,8 @@ target_link_libraries(generic_immich
 
 install(TARGETS generic_immich
         DESTINATION ${DPluginGenericInstallPath})
+
+# Theme icon (dk-immich), looked up by the plugin's icon().
+include(GNUInstallDirs)
+install(FILES icons/dk-immich.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)

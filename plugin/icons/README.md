@@ -1,6 +1,8 @@
 # Icons
 
-digiKam web-service plugins load a theme icon named `dk-immich`
-(hi-color PNG/SVG sets, installed like the other dk-* icons).
-The plugin currently falls back to a missing theme icon; a real
-icon set lands here before the first release.
+`dk-immich.svg` is the plugin's theme icon: a photo frame with a
+sync badge. The plugin looks it up as `dk-immich` (see
+`ImmichPlugin::icon()`); the CMake install rule places it in
+`share/icons/hicolor/scalable/apps`, where digiKam's other `dk-*`
+icons live. When the icon is not installed, the Export action
+simply shows no icon.
