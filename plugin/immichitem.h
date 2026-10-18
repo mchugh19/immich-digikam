@@ -28,11 +28,19 @@ struct ImmichAlbum
     int     assetCount = 0;
 };
 
+/** One Immich tag, as returned by GET /tags. */
+struct ImmichTag
+{
+    QString id;
+    QString name;
+};
+
 /** One asset of an album, as listed by POST /search/metadata. */
 struct ImmichAssetRef
 {
     QString id;
     QString fileName;
+    QString fileCreatedAt;
 };
 
 } // namespace DigikamGenericImmichPlugin

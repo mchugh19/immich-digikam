@@ -41,9 +41,9 @@ public:
     QNetworkAccessManager* net     = nullptr;
 
     // What a pending reply should be parsed as when it finishes.
-    enum class Op { None, ListAlbums, CreateAlbum, AddToAlbum, Upload,
+    enum class Op { None, ListAlbums, ListTags, CreateAlbum, AddToAlbum, Upload,
                     AlbumAssets, DownloadOriginal, DownloadSidecar,
-                    DownloadRecord, BulkCheck };
+                    DownloadRecord, BulkCheck, Thumbnail };
     QHash<QNetworkReply*, Op> ops;
 
     // Download context per reply: asset id and destination path.
@@ -52,6 +52,14 @@ public:
     // Album-asset listing accumulates across search pages.
     QList<ImmichAssetRef> listingAccum;
     QString               listingAlbumId;
+    QString               listingTagId;
+    // Bumped by every new listing; page replies stamped with an
+    // older generation are dropped, so a superseded listing (the
+    // user clicked another source mid-listing) cannot leak its
+    // assets into the current one.
+    int                   listingGen = 0;
+    QHash<QNetworkReply*, int> listingGenByReply;
+    QHash<QNetworkReply*, QString> thumbCtx;
 };
 
 ImmichTalker::ImmichTalker(ImmichSession* const session, QObject* const parent)
@@ -202,25 +210,61 @@ void ImmichTalker::uploadAsset(const QString& filePath, const QString& sidecarPa
     Q_EMIT signalBusy(true);
 }
 
+void ImmichTalker::listTags()
+{
+    QNetworkReply* const reply = d->net->get(makeRequest(QStringLiteral("/tags")));
+    d->ops.insert(reply, Private::Op::ListTags);
+    Q_EMIT signalBusy(true);
+}
+
 void ImmichTalker::listAlbumAssets(const QString& albumId)
 {
     d->listingAccum.clear();
     d->listingAlbumId = albumId;
-    fetchAlbumAssetsPage(1);
+    d->listingTagId.clear();
+    ++d->listingGen;
+    fetchListingPage(1);
 }
 
-void ImmichTalker::fetchAlbumAssetsPage(int page)
+void ImmichTalker::listTagAssets(const QString& tagId)
 {
-    const QJsonObject obj {
-        { QStringLiteral("albumIds"), QJsonArray { d->listingAlbumId } },
-        { QStringLiteral("size"),     250 },
-        { QStringLiteral("page"),     page }
+    d->listingAccum.clear();
+    d->listingTagId   = tagId;
+    d->listingAlbumId.clear();
+    ++d->listingGen;
+    fetchListingPage(1);
+}
+
+void ImmichTalker::fetchThumbnail(const QString& assetId)
+{
+    QNetworkReply* const reply = d->net->get(
+        makeRequest(QStringLiteral("/assets/%1/thumbnail").arg(assetId)));
+    d->ops.insert(reply, Private::Op::Thumbnail);
+    d->thumbCtx.insert(reply, assetId);
+    Q_EMIT signalBusy(true);
+}
+
+void ImmichTalker::fetchListingPage(int page)
+{
+    QJsonObject obj {
+        { QStringLiteral("size"), 250 },
+        { QStringLiteral("page"), page }
     };
+
+    if (!d->listingTagId.isEmpty())
+    {
+        obj.insert(QStringLiteral("tagIds"), QJsonArray { d->listingTagId });
+    }
+    else
+    {
+        obj.insert(QStringLiteral("albumIds"), QJsonArray { d->listingAlbumId });
+    }
 
     QNetworkRequest req = makeRequest(QStringLiteral("/search/metadata"));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
     d->ops.insert(reply, Private::Op::AlbumAssets);
+    d->listingGenByReply.insert(reply, d->listingGen);
     Q_EMIT signalBusy(true);
 }
 
@@ -342,6 +386,16 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         return;
     }
 
+    if (op == Private::Op::Thumbnail)
+    {
+        const QString  assetId = d->thumbCtx.take(reply);
+        const QByteArray bytes = (reply->error() == QNetworkReply::NoError) ? reply->readAll()
+                                                                            : QByteArray();
+        reply->deleteLater();
+        Q_EMIT signalThumbnail(assetId, bytes);
+        return;
+    }
+
     if (op == Private::Op::DownloadRecord)
     {
         // A record that cannot be fetched still leaves a good
@@ -406,6 +460,32 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
             Q_EMIT signalAlbumUpdated();
             break;
 
+        case Private::Op::ListTags:
+        {
+            QList<ImmichTag> tags;
+
+            for (const QJsonValue& val : doc.array())
+            {
+                const QJsonObject obj = val.toObject();
+                ImmichTag tag;
+                tag.id   = obj.value(QStringLiteral("id")).toString();
+                tag.name = obj.value(QStringLiteral("value")).toString();
+
+                if (tag.name.isEmpty())
+                {
+                    tag.name = obj.value(QStringLiteral("name")).toString();
+                }
+
+                if (!tag.id.isEmpty() && !tag.name.isEmpty())
+                {
+                    tags.append(tag);
+                }
+            }
+
+            Q_EMIT signalTags(tags);
+            break;
+        }
+
         case Private::Op::Upload:
         {
             const QJsonObject obj = doc.object();
@@ -416,6 +496,13 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
         case Private::Op::AlbumAssets:
         {
+            if (d->listingGenByReply.take(reply) != d->listingGen)
+            {
+                // A page from a superseded listing: drop it and let
+                // its pagination chain die here.
+                break;
+            }
+
             const QJsonObject assetsObj = doc.object().value(QStringLiteral("assets")).toObject();
             const QJsonArray items = assetsObj.value(QStringLiteral("items")).toArray();
 
@@ -423,8 +510,9 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
             {
                 const QJsonObject obj = val.toObject();
                 ImmichAssetRef asset;
-                asset.id       = obj.value(QStringLiteral("id")).toString();
-                asset.fileName = obj.value(QStringLiteral("originalFileName")).toString();
+                asset.id            = obj.value(QStringLiteral("id")).toString();
+                asset.fileName      = obj.value(QStringLiteral("originalFileName")).toString();
+                asset.fileCreatedAt = obj.value(QStringLiteral("fileCreatedAt")).toString();
                 d->listingAccum.append(asset);
             }
 
@@ -434,7 +522,7 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
             if (!nextPage.isEmpty())
             {
-                fetchAlbumAssetsPage(nextPage.toInt());
+                fetchListingPage(nextPage.toInt());
                 break;
             }
 

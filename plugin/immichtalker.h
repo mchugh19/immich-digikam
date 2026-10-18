@@ -73,8 +73,22 @@ public:
      */
     void uploadAsset(const QString& filePath, const QString& sidecarPath = QString());
 
+    /** List the server's tags. Emits signalTags. */
+    void listTags();
+
     /** List the assets of one album (id + original file name). */
     void listAlbumAssets(const QString& albumId);
+
+    /** List the assets carrying one tag. Emits signalAlbumAssets,
+     * like listAlbumAssets: the search endpoint takes a tagIds
+     * filter in place of albumIds.
+     */
+    void listTagAssets(const QString& tagId);
+
+    /** Fetch one asset's preview thumbnail. Emits signalThumbnail
+     * with the image bytes (empty when unavailable).
+     */
+    void fetchThumbnail(const QString& assetId);
 
     /**
      * Download one asset's original to targetPath, followed by its
@@ -101,6 +115,8 @@ Q_SIGNALS:
     void signalBusy(bool val);
     void signalError(const QString& msg);
     void signalAlbums(const QList<ImmichAlbum>& albumList);
+    void signalTags(const QList<ImmichTag>& tagList);
+    void signalThumbnail(const QString& assetId, const QByteArray& bytes);
     void signalAlbumCreated(const ImmichAlbum& album);
     void signalAlbumUpdated();
     void signalUploadSucceeded(const QString& assetId, const QString& status);
@@ -123,7 +139,7 @@ private:
 
     QNetworkRequest makeRequest(const QString& path) const;
     void sendJson(const QString& method, const QString& path, const QByteArray& body);
-    void fetchAlbumAssetsPage(int page);
+    void fetchListingPage(int page);
 
     class Private;
     Private* const d;
