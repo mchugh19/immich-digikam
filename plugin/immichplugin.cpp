@@ -48,9 +48,11 @@ QString ImmichPlugin::iid() const
 
 QIcon ImmichPlugin::icon() const
 {
-    // Theme icon shipped as icons/dk-immich.svg (installed into
-    // the hicolor theme by the CMake install rule).
-    return QIcon::fromTheme(QLatin1String("dk-immich"));
+    // The icon is embedded in the plugin binary (qt_add_resources
+    // in CMakeLists.txt), so it is available however the .so was
+    // installed, including a manual copy that never runs the
+    // theme install rule.
+    return QIcon(QStringLiteral(":/dk-immich.svg"));
 }
 
 QString ImmichPlugin::description() const
