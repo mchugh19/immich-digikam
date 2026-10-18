@@ -151,7 +151,7 @@ void ImmichTalker::uploadAsset(const QString& filePath, const QString& sidecarPa
 {
     const QFileInfo info(filePath);
 
-    // Same field contract the Python prototype verified live:
+    // Field contract verified live against Immich 3.3.3:
     // deviceAssetId derives from the absolute path, timestamps are
     // the file's mtime, the sidecar travels as sidecarData.
     const QString deviceAssetId = QStringLiteral("digikam-") +

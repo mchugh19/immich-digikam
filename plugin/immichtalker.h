@@ -33,8 +33,8 @@ class ImmichSession;
 
 /**
  * Immich API client. One asynchronous call per operation, results
- * delivered by signals, mirroring the endpoints the Python
- * prototype verified against a live server (Immich 3.3.3):
+ * delivered by signals. Endpoints verified against a live server
+ * (Immich 3.3.3):
  *
  *   GET  /albums                    list albums
  *   POST /albums                    create an album

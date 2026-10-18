@@ -6,65 +6,26 @@ files back. Primary use case: building family collages and
 calendars from the Immich library without giving up digiKam's
 editing and organisation.
 
-The repository has two parts:
+The plugin (`plugin/`) is a digiKam DPlugin (C++/Qt) modeled on
+digiKam's own web-service tools: it registers "Export to
+Immich..." in the Export menu and "Import from Immich..." in
+the Import menu, each opening a shared window in its own mode.
+See `plugin/README.md` for building, installing, the API key
+permissions and the full feature list.
 
-- **Prototype** (this directory): a Python CLI that validates the
-  API contract and the XMP round-trip against a live server. It is
-  the reference implementation for the plugin's behaviour.
-- **Plugin** (`plugin/`): the digiKam DPlugin (C++/Qt) port, for an
-  in-GUI flow with a settings page and an album browser. Scaffold
-  stage: plugin/session/talker/window classes exist and the talker
-  implements the verified endpoints; it has not been compiled yet
-  (first build is in a Fedora container with digikam-devel).
+## How metadata travels
 
-## Prototype
+Metadata round-trips through XMP sidecar files, which both
+digiKam and Immich read and write natively. Verified live
+against Immich 3.3.3: tags, captions, GPS and the rating from a
+sidecar are all applied to the asset, the rating in every
+encoding (element form, attribute form, and embedded in the
+photo's own XMP packet). The rating is stored as the asset's
+EXIF rating: read it back as `exifInfo.rating`, because the
+3.3.3 asset record has no top-level `rating` field.
 
-Pull an Immich album's originals into a local folder for digiKam, then push
-finished files back. Metadata round-trips through XMP sidecar files, which
-both digiKam and Immich read and write natively. Verified live against
-Immich 3.3.3 (2026-10-18): on push, tags, captions, GPS and the rating
-from the sidecar are all applied to the asset, the rating in every
-encoding tried (element form, attribute form, and embedded in the
-photo's own XMP packet). The rating is stored as the asset's EXIF
-rating: read it back as `exifInfo.rating`, because the 3.3.3 asset
-record has no top-level `rating` field.
-
-Pixel edits do NOT travel in XMP. Only rendered exports (JPEG/TIFF) carry
-pixel changes back to Immich.
-
-## Setup
-
-1. In Immich: Account Settings -> API Keys -> New API Key.
-   Permissions needed: `asset.create asset.read asset.download asset.view
-   album.read album.create albumAsset.create`
-2. `mkdir -p ~/.config/immich-digikam`
-3. Create `~/.config/immich-digikam/config.json` (mode 0600):
-   `{"server_url": "https://photos.example.com", "api_key": "..."}`
-
-## Usage
-
-```
-# download album "Summer 2026" into ~/Pictures/immich-Summer-2026
-immich-digikam pull "Summer 2026"
-
-# after editing/exporting in digiKam, upload new/changed files
-# and add them to the album (create it if missing)
-immich-digikam push --dir ~/Pictures/immich-Summer-2026 \
-    --album "Summer 2026" --create-album
-```
-
-`pull` writes a `.immich-manifest.json` mapping files to Immich asset IDs.
-`push` uploads only files that are new or changed since the manifest, and
-includes a same-named `.xmp` sidecar when one sits next to the file.
-
-## The plugin port
-
-`plugin/` ports this logic to a digiKam DPlugin (DPluginGeneric),
-modeled on digiKam's own web-service exporters: a settings page
-for the server URL and API key, an album browser, and pull/push
-driven from the digiKam selection. Class layout mirrors the
-Piwigo plugin (plugin / session / talker / window); the talker's
-endpoints and upload fields are the ones the prototype verified.
+Pixel edits do NOT travel in XMP. Only rendered exports
+(JPEG/TIFF) carry pixel changes back to Immich.
 
 ## Roadmap
 
