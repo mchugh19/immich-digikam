@@ -364,6 +364,11 @@ private Q_SLOTS:
         QVERIFY(!imagesLookSame(solid(64, 64, 100), solid(64, 64, 130)));
         QVERIFY(!imagesLookSame(solid(64, 64, 0), solid(64, 64, 255)));
         QVERIFY(imageDifference(QImage(), solid(64, 64, 100)) < 0.0);
+        // Boundary, from the live validation: a subtle edit
+        // (mean difference ~7-8) must count as edited, while
+        // re-encode noise (~3) must not.
+        QVERIFY(!imagesLookSame(solid(64, 64, 100), solid(64, 64, 107)));
+        QVERIFY(imagesLookSame(solid(64, 64, 100), solid(64, 64, 103)));
     }
 
     void gateBothChangedNewerSideWins()

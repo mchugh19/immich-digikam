@@ -406,8 +406,16 @@ inline double imageDifference(const QImage& a, const QImage& b)
 
 inline bool imagesLookSame(const QImage& a, const QImage& b)
 {
+    // Threshold validated against a real photo and its real
+    // server thumbnail: the same photo scores 0.34, a quality-60
+    // recompress of it 1.33, a x1.05 brightness edit 8.32 and a
+    // x1.15 edit with a colour cast 16.66. 5.0 keeps a wide
+    // margin over re-encodes while still catching subtle edits:
+    // a missed edit never reaches the server at all, while a
+    // false "edited" costs one replace and then stabilises
+    // (the new copy checksum-matches from then on).
     const double diff = imageDifference(a, b);
-    return diff >= 0.0 && diff <= 10.0;
+    return diff >= 0.0 && diff <= 5.0;
 }
 
 inline QJsonObject loadSyncState(const QString& path)
