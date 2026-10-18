@@ -67,6 +67,8 @@ private Q_SLOTS:
     void slotSaveSettings();
     void slotRefreshAlbums();
     void slotAlbums(const QList<ImmichAlbum>& albums);
+    void slotNewAlbum();
+    void slotAlbumCreated(const ImmichAlbum& album);
     void slotUploadSelection();
     void slotUploadSucceeded(const QString& assetId, const QString& status);
     void slotUploadCheck(const QMap<QString, QString>& duplicatesByPath);
@@ -79,6 +81,7 @@ private Q_SLOTS:
 
 private:
 
+    void setTransferButtonsEnabled(bool enabled);
     void nextUpload();
     void finishUpload();
     void nextDownload();

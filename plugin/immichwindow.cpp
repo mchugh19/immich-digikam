@@ -28,6 +28,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -59,11 +60,14 @@ public:
     QLabel*       targetLabel = nullptr;
     QLabel*       status      = nullptr;
     QPushButton*  refreshBtn  = nullptr;
+    QPushButton*  newAlbumBtn = nullptr;
     QPushButton*  uploadBtn   = nullptr;
     QPushButton*  downloadBtn = nullptr;
     QProgressBar* progress    = nullptr;
 
-    // Upload queue state.
+    // Album to select after the next list refresh (a just-created
+    // album, or simply the selection surviving a refresh).
+    QString      pendingSelectId;
     QList<QUrl>  pending;
     QStringList  uploadedIds;
     QString      targetAlbumId;
@@ -108,6 +112,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
 
     auto* const saveBtn = new QPushButton(QStringLiteral("Save settings"));
     d->refreshBtn       = new QPushButton(QStringLiteral("Refresh albums"));
+    d->newAlbumBtn      = new QPushButton(QStringLiteral("New album..."));
     d->uploadBtn        = new QPushButton(QStringLiteral("Upload selection"));
     d->downloadBtn      = new QPushButton(QStringLiteral("Download album"));
     d->albumList        = new QListWidget;
@@ -120,6 +125,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
     layout->addLayout(form);
     layout->addWidget(saveBtn);
     layout->addWidget(d->refreshBtn);
+    layout->addWidget(d->newAlbumBtn);
     layout->addWidget(d->albumList);
     layout->addWidget(d->targetLabel);
     layout->addWidget(d->uploadBtn);
@@ -129,6 +135,8 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, QWidget* const parent)
 
     connect(saveBtn, &QPushButton::clicked, this, &ImmichWindow::slotSaveSettings);
     connect(d->refreshBtn, &QPushButton::clicked, this, &ImmichWindow::slotRefreshAlbums);
+    connect(d->newAlbumBtn, &QPushButton::clicked, this, &ImmichWindow::slotNewAlbum);
+    connect(d->talker, &ImmichTalker::signalAlbumCreated, this, &ImmichWindow::slotAlbumCreated);
     connect(d->uploadBtn, &QPushButton::clicked, this, &ImmichWindow::slotUploadSelection);
     connect(d->albumList, &QListWidget::currentItemChanged, this,
             [this](QListWidgetItem* current, QListWidgetItem*)
@@ -175,9 +183,58 @@ void ImmichWindow::slotRefreshAlbums()
     d->talker->listAlbums();
 }
 
+void ImmichWindow::setTransferButtonsEnabled(bool enabled)
+{
+    d->refreshBtn->setEnabled(enabled);
+    d->newAlbumBtn->setEnabled(enabled);
+    d->uploadBtn->setEnabled(enabled);
+    d->downloadBtn->setEnabled(enabled);
+}
+
+void ImmichWindow::slotNewAlbum()
+{
+    if (d->uploading || d->downloading)
+    {
+        return;
+    }
+
+    d->session->setUrl(d->urlEdit->text());
+    d->session->setApiKey(d->keyEdit->text());
+
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, QStringLiteral("New album"),
+                                               QStringLiteral("Album name:"),
+                                               QLineEdit::Normal, QString(), &ok).trimmed();
+
+    if (!ok || name.isEmpty())
+    {
+        return;
+    }
+
+    d->status->setText(QStringLiteral("Creating album..."));
+    d->talker->createAlbum(name);
+}
+
+void ImmichWindow::slotAlbumCreated(const ImmichAlbum& album)
+{
+    // Refresh the list and land the selection on the new album,
+    // ready to be the upload target.
+    d->pendingSelectId = album.id;
+    d->status->setText(QStringLiteral("Album '%1' created.").arg(album.name));
+    d->talker->listAlbums();
+}
+
 void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
 {
+    QListWidgetItem* const previous = d->albumList->currentItem();
+    const QString restoreId = !d->pendingSelectId.isEmpty() ? d->pendingSelectId
+                              : (previous ? previous->data(Qt::UserRole).toString()
+                                          : QString());
+    d->pendingSelectId.clear();
+
     d->albumList->clear();
+
+    QListWidgetItem* selectItem = nullptr;
 
     for (const ImmichAlbum& album : albums)
     {
@@ -185,6 +242,16 @@ void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
             QStringLiteral("%1 (%2)").arg(album.name).arg(album.assetCount), d->albumList);
         item->setData(Qt::UserRole, album.id);
         item->setData(Qt::UserRole + 1, album.name);
+
+        if (album.id == restoreId)
+        {
+            selectItem = item;
+        }
+    }
+
+    if (selectItem)
+    {
+        d->albumList->setCurrentItem(selectItem);
     }
 
     d->status->setText(QStringLiteral("%1 albums").arg(albums.size()));
@@ -221,9 +288,7 @@ void ImmichWindow::slotUploadSelection()
     d->alreadyThere = 0;
     d->uploading   = true;
 
-    d->refreshBtn->setEnabled(false);
-    d->uploadBtn->setEnabled(false);
-    d->downloadBtn->setEnabled(false);
+    setTransferButtonsEnabled(false);
     d->progress->setRange(0, d->total);
     d->progress->setValue(0);
     d->progress->setVisible(true);
@@ -335,9 +400,7 @@ void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*
 void ImmichWindow::finishUpload()
 {
     d->uploading = false;
-    d->refreshBtn->setEnabled(true);
-    d->uploadBtn->setEnabled(true);
-    d->downloadBtn->setEnabled(true);
+    setTransferButtonsEnabled(true);
 
     if (!d->tempSidecar.isEmpty())
     {
@@ -405,9 +468,7 @@ void ImmichWindow::slotDownloadAlbum()
     d->downloading   = true;
     d->dlListing     = true;
 
-    d->refreshBtn->setEnabled(false);
-    d->uploadBtn->setEnabled(false);
-    d->downloadBtn->setEnabled(false);
+    setTransferButtonsEnabled(false);
     d->status->setText(QStringLiteral("Listing album assets..."));
 
     d->talker->listAlbumAssets(albumItem->data(Qt::UserRole).toString());
@@ -492,9 +553,7 @@ void ImmichWindow::slotDownloadFinished(const QString& /*assetId*/, bool ok)
 void ImmichWindow::finishDownload()
 {
     d->downloading = false;
-    d->refreshBtn->setEnabled(true);
-    d->uploadBtn->setEnabled(true);
-    d->downloadBtn->setEnabled(true);
+    setTransferButtonsEnabled(true);
 
     d->status->setText(QStringLiteral("Downloaded %1 assets (%2 already on disk, %3 failed) to %4")
                            .arg(d->dlDownloaded)
@@ -519,9 +578,7 @@ void ImmichWindow::slotError(const QString& msg)
     {
         d->dlListing   = false;
         d->downloading = false;
-        d->refreshBtn->setEnabled(true);
-        d->uploadBtn->setEnabled(true);
-        d->downloadBtn->setEnabled(true);
+        setTransferButtonsEnabled(true);
         d->status->setText(msg);
         return;
     }
