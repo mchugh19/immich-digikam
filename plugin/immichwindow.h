@@ -106,9 +106,18 @@ private:
 
     void setTransferButtonsEnabled(bool enabled);
     void applyFilter();
+    int  findSourceRow(const QString& id) const;
+    QString currentSourceId() const;
+    QString currentSourceName() const;
+    void addSourceRow(const QString& id, const QString& name,
+                      const QString& countText, const QString& rangeText,
+                      const QString& thumbnailAssetId);
+    void selectSource(const QString& id);
+    void queueThumb(bool cover, const QString& key, const QString& assetId);
+    void pumpThumbs();
+    void dropThumbJobs(bool covers);
     void startPreview(const QString& sourceId);
     void fillPreview();
-    void nextThumbnail();
     void nextUpload();
     void finishUpload();
     void nextDownload();
