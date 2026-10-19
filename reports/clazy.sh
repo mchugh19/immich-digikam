@@ -83,7 +83,7 @@ $CMAKE_BINARY -G "Unix Makefiles" . \
       -DBUILD_TESTING=ON \
       -DENABLE_ASAN=OFF \
       -Wno-dev \
-      ..
+      ../plugin
 
 make -j$CPU_CORES 2> ${REPORT_DIR}/trace.log
 
