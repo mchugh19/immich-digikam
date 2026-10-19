@@ -131,6 +131,7 @@ private Q_SLOTS:
 private:
 
     void setTransferButtonsEnabled(bool enabled);
+    void setAlbumLoading(bool loading);
     void applyFilter();
     QListWidgetItem* findAlbumItem(const QString& id) const;
     QString currentSourceId() const;

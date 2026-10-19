@@ -47,6 +47,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
+#include <QStackedLayout>
 #include <QStandardPaths>
 #include <QVBoxLayout>
 
@@ -58,6 +59,7 @@
 
 #include "dinfointerface.h"
 #include "dmetadata.h"
+#include "workingwidget.h"
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
@@ -81,6 +83,11 @@ public:
     QRadioButton* albumsSrc   = nullptr;
     QRadioButton* tagsSrc     = nullptr;
     QListWidget*  albumGrid   = nullptr;
+    QWidget*      albumArea   = nullptr;
+    QStackedLayout* albumStack = nullptr;
+    QWidget*      albumLoadingOverlay = nullptr;
+    WorkingWidget* albumSpinner = nullptr;
+    bool          albumsLoading = false;
     QListWidget*  tagGrid     = nullptr;
     QListWidget*  previewList = nullptr;
     QComboBox*    previewSort = nullptr;
@@ -411,6 +418,45 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     // stretch alone could squeeze the grid below a row's height,
     // leaving a clipped row and a scrollbar for a single row.
     d->albumGrid->setMinimumHeight(248 + 16);
+
+    // The album area carries the grid plus a loading overlay
+    // (digiKam's own throbber in a small panel, the arrangement
+    // the image editor uses over its canvas): while the album
+    // list is in flight the overlay shows over the grid, so a
+    // slow server reads as "loading" rather than as an empty
+    // or stale album view.
+    d->albumArea = new QWidget;
+    d->albumArea->setMinimumHeight(248 + 16);
+    d->albumStack = new QStackedLayout(d->albumArea);
+    d->albumStack->setStackingMode(QStackedLayout::StackAll);
+    d->albumStack->addWidget(d->albumGrid);
+    d->albumLoadingOverlay = new QWidget(d->albumArea);
+
+    auto* const overlayLayout = new QVBoxLayout(d->albumLoadingOverlay);
+    overlayLayout->addStretch();
+
+    auto* const loadingCard = new QFrame(d->albumLoadingOverlay);
+    loadingCard->setFrameShape(QFrame::StyledPanel);
+    loadingCard->setAutoFillBackground(true);
+    auto* const cardLayout = new QVBoxLayout(loadingCard);
+    d->albumSpinner = new WorkingWidget(loadingCard);
+    cardLayout->addWidget(d->albumSpinner, 0, Qt::AlignHCenter);
+    auto* const loadingLabel = new QLabel(i18n("Loading albums..."), loadingCard);
+    loadingLabel->setAlignment(Qt::AlignHCenter);
+    cardLayout->addWidget(loadingLabel);
+
+    auto* const cardRow = new QHBoxLayout;
+    cardRow->addStretch();
+    cardRow->addWidget(loadingCard);
+    cardRow->addStretch();
+    overlayLayout->addLayout(cardRow);
+    overlayLayout->addStretch();
+
+    d->albumStack->addWidget(d->albumLoadingOverlay);
+    d->albumStack->setCurrentWidget(d->albumGrid);
+    d->albumLoadingOverlay->setVisible(false);
+    d->albumSpinner->toggleTimer(false);
+
     d->filterEdit       = new QLineEdit;
     d->filterEdit->setPlaceholderText(i18n("Filter..."));
     d->filterEdit->setClearButtonEnabled(true);
@@ -524,7 +570,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
         auto* const pickerLayout = new QVBoxLayout(d->pickerBox);
         pickerLayout->setContentsMargins(48, 0, 0, 0);
         pickerLayout->addWidget(d->filterEdit);
-        pickerLayout->addWidget(d->albumGrid, 2);
+        pickerLayout->addWidget(d->albumArea, 2);
         layout->addWidget(d->pickerBox, 2);
         layout->addWidget(d->tagGrid, 2);
     }
@@ -532,7 +578,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     {
         layout->addWidget(d->filterEdit);
         layout->addLayout(sourceRow);
-        layout->addWidget(d->albumGrid, 2);
+        layout->addWidget(d->albumArea, 2);
         layout->addWidget(d->tagGrid, 2);
     }
 
@@ -1032,6 +1078,21 @@ void ImmichWindow::dropThumbJobs(bool covers)
     }
 }
 
+void ImmichWindow::setAlbumLoading(bool loading)
+{
+    d->albumsLoading = loading;
+
+    if (!d->albumStack || !d->albumLoadingOverlay)
+    {
+        return;
+    }
+
+    d->albumLoadingOverlay->setVisible(loading);
+    d->albumStack->setCurrentWidget(loading ? static_cast<QWidget*>(d->albumLoadingOverlay)
+                                            : static_cast<QWidget*>(d->albumGrid));
+    d->albumSpinner->toggleTimer(loading);
+}
+
 void ImmichWindow::slotRefreshAlbums()
 {
     d->session->setUrl(d->urlEdit->text());
@@ -1044,6 +1105,7 @@ void ImmichWindow::slotRefreshAlbums()
     }
     else
     {
+        setAlbumLoading(true);
         d->talker->listAlbums();
     }
 }
@@ -1059,7 +1121,7 @@ void ImmichWindow::slotSourceChanged()
 
     d->sourceIsTags = tags;
     d->newAlbumBtn->setEnabled(!tags);
-    d->albumGrid->setVisible(!tags);
+    d->albumArea->setVisible(!tags);
     d->tagGrid->setVisible(tags);
     d->albumGrid->clear();
     d->tagGrid->clear();
@@ -1193,11 +1255,14 @@ void ImmichWindow::slotAlbumCreated(const ImmichAlbum& album)
     // ready to be the upload target.
     d->pendingSelectId = album.id;
     d->status->setText(i18n("Album '%1' created.").arg(album.name));
+    setAlbumLoading(true);
     d->talker->listAlbums();
 }
 
 void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
 {
+    setAlbumLoading(false);
+
     const QString restoreId = !d->pendingSelectId.isEmpty() ? d->pendingSelectId
                                                             : currentSourceId();
     d->pendingSelectId.clear();
@@ -2964,6 +3029,13 @@ void ImmichWindow::finishDownload()
 
 void ImmichWindow::slotError(const QString& msg)
 {
+    if (!d->uploading && !d->downloading)
+    {
+        // An idle-time error is the album list's failure mode:
+        // the load is over either way, so the spinner stops.
+        setAlbumLoading(false);
+    }
+
     if (d->cancelling)
     {
         // The aborted reply lands here: finalize the transfer
