@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: 2008-2026 by Gilles Caulier, <caulier dot gilles at gmail dot com>
+#
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Clazy static analyzer configuration used by project/reports/clazy.sh
+
+# --- Directories to exclude from Clazy static analysis.
+
+IGNORE_DIRS=".*include.*|"
+IGNORE_DIRS+=".moc_*.*|"
+IGNORE_DIRS+=".*/opt/qt6/include/.*|"
+IGNORE_DIRS+=".*/usr/include/.*|"
+# Remove last character
+IGNORE_DIRS=${IGNORE_DIRS::-1}
+
+export CLAZY_IGNORE_DIRS=$IGNORE_DIRS
+
+# --- Checkers to include on Clazy static analysis.
+
+export CLAZY_CHECKS="\
+level2,\
+no-qproperty-without-notify,\
+no-old-style-connect,\
+no-qstring-allocations,\
+no-qstring-arg,\
+no-qstring-ref,\
+no-qstring-insensitive-allocation,\
+no-function-args-by-value,\
+no-fully-qualified-moc-types,\
+no-unexpected-flag-enumerator-value,\
+no-module-include,\
+signal-with-return-value,\
+raw-environment-function,\
+qt-keywords,\
+missing-qobject-macro,\
+range-loop-detach,\
+range-loop-reference,\
+use-static-qregularexpression,\
+container-inside-loop,\
+isempty-vs-count,\
+qstring-ref,\
+raw-environment-function,\
+compare-member-check,\
+sanitize-inline-keyword,\
+unexpected-flag-enumerator-value,\
+unused-result-check,\
+use-arrow-operator-instead-of-data,\
+used-qunused-variable\
+"
