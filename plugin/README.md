@@ -90,17 +90,17 @@ Good to know:
 
 ## Server and API key
 
-Tested against Immich 3.3.3. The API key needs these permissions:
-`asset.upload`, `asset.read`, `asset.view`, `asset.download`,
-`album.read`, `album.create`, `albumAsset.create`, `tag.read`.
-The export metadata sync additionally needs `asset.update`,
-`tag.create` and `tag.asset`; without them the sync is refused
-by the server and the run's summary says so (uploads and
-downloads are unaffected). Stacking a replaced photo over its
-previous version additionally needs `stack.create` and
-`stack.read`; if stacking is refused, the replace falls back
-to moving the old copy to Immich's trash, which needs
-`asset.delete`.
+Tested against Immich 3.3.3. The API key needs:
+
+- Base: `asset.upload`, `asset.read`, `asset.view`,
+  `asset.download`, `album.read`, `album.create`,
+  `albumAsset.create`, `tag.read`.
+- Metadata sync: `asset.update`, `tag.create`, `tag.asset`
+  (without them the sync is refused and the summary says so;
+  uploads and downloads are unaffected).
+- Stacking replaced photos: `stack.create`, `stack.read`.
+- Overwrite, and the trash fallback when stacking is
+  refused: `asset.delete`.
 
 ## Build
 
