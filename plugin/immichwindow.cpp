@@ -49,6 +49,8 @@
 #include <QSet>
 #include <QStackedLayout>
 #include <QStandardPaths>
+#include <QPainter>
+#include <QTimer>
 #include <QVBoxLayout>
 
 // KDE includes
@@ -59,7 +61,6 @@
 
 #include "dinfointerface.h"
 #include "dmetadata.h"
-#include "workingwidget.h"
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
@@ -67,6 +68,73 @@
 
 namespace DigikamGenericImmichPlugin
 {
+
+// A small throbber drawn with QPainter. digiKam has an
+// equivalent widget (WorkingWidget), but it is internal to
+// libdigikamcore: its header is not among the installed
+// digiKam headers, so the plugin draws its own.
+class SpinnerWidget : public QWidget
+{
+public:
+
+    explicit SpinnerWidget(QWidget* const parent = nullptr)
+        : QWidget(parent)
+    {
+        setFixedSize(32, 32);
+        m_timer.setInterval(100);
+
+        connect(&m_timer, &QTimer::timeout,
+                this, [this]()
+                {
+                    m_step = (m_step + 1) % 12;
+                    update();
+                });
+    }
+
+    void toggleTimer(bool turnOn)
+    {
+        if (turnOn)
+        {
+            m_timer.start();
+        }
+        else
+        {
+            m_timer.stop();
+        }
+    }
+
+protected:
+
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.translate(width() / 2.0, height() / 2.0);
+
+        const qreal  radius = qMin(width(), height()) / 2.0 - 2.0;
+        const QColor base   = palette().color(QPalette::Text);
+        painter.setPen(Qt::NoPen);
+
+        for (int i = 0; i < 12; ++i)
+        {
+            // Spokes fade behind the leading one, which advances
+            // one position per timer tick.
+            const int behind = (12 + m_step - i) % 12;
+            QColor spoke = base;
+            spoke.setAlpha(255 - behind * 18);
+            painter.setBrush(spoke);
+            painter.save();
+            painter.rotate(i * 30.0);
+            painter.drawRoundedRect(QRectF(radius * 0.5, -1.5, radius * 0.5, 3.0), 1.5, 1.5);
+            painter.restore();
+        }
+    }
+
+private:
+
+    QTimer m_timer;
+    int    m_step = 0;
+};
 
 class ImmichWindow::Private
 {
@@ -86,7 +154,7 @@ public:
     QWidget*      albumArea   = nullptr;
     QStackedLayout* albumStack = nullptr;
     QWidget*      albumLoadingOverlay = nullptr;
-    WorkingWidget* albumSpinner = nullptr;
+    SpinnerWidget* albumSpinner = nullptr;
     bool          albumsLoading = false;
     QListWidget*  tagGrid     = nullptr;
     QListWidget*  previewList = nullptr;
@@ -420,11 +488,10 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->albumGrid->setMinimumHeight(248 + 16);
 
     // The album area carries the grid plus a loading overlay
-    // (digiKam's own throbber in a small panel, the arrangement
-    // the image editor uses over its canvas): while the album
-    // list is in flight the overlay shows over the grid, so a
-    // slow server reads as "loading" rather than as an empty
-    // or stale album view.
+    // (a throbber in a small panel over the grid): while the
+    // album list is in flight the overlay shows over the grid,
+    // so a slow server reads as "loading" rather than as an
+    // empty or stale album view.
     d->albumArea = new QWidget;
     d->albumArea->setMinimumHeight(248 + 16);
     d->albumStack = new QStackedLayout(d->albumArea);
@@ -439,7 +506,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     loadingCard->setFrameShape(QFrame::StyledPanel);
     loadingCard->setAutoFillBackground(true);
     auto* const cardLayout = new QVBoxLayout(loadingCard);
-    d->albumSpinner = new WorkingWidget(loadingCard);
+    d->albumSpinner = new SpinnerWidget(loadingCard);
     cardLayout->addWidget(d->albumSpinner, 0, Qt::AlignHCenter);
     auto* const loadingLabel = new QLabel(i18n("Loading albums..."), loadingCard);
     loadingLabel->setAlignment(Qt::AlignHCenter);
