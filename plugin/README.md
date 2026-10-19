@@ -7,163 +7,86 @@ digiKam's own web-service plugins (Piwigo in particular).
 
 ## Features
 
-- Server URL and API key stored in digiKam's configuration
-  (KConfig group "Immich Settings").
-- Sources are shown as tiles in the shape of Immich's own
-  views: an album tile is a large cover with the name under it
-  in a larger font, then the date range and the item count in
-  smaller type; a tag tile is the tag icon and its name. Tiles
-  are sorted by name and have a filter box.
-- Export destination: an "Upload to" radio choice between
-  "Library only" (the default; uploads go to the Immich library
-  with no album) and "Album" (the selected album tile is the
-  target). The album picker is hidden while "Library only" is
-  chosen, so the selection preview gets the full window, and
-  the choice is remembered.
-  Everything else about an export (dedupe, metadata sync,
-  identity matching, replace handling) works the same either
-  way; only the album assignment step is skipped.
-- Import source switch (albums or tags): the import tool can
-  pull an album or every asset carrying a tag. Selecting a
-  source previews its contents as thumbnails (sortable by date
-  or name) before anything is downloaded. The filter box
-  narrows the source tiles only, never the preview.
-- Upload: each selected item is sent with an XMP sidecar
-  generated from the item's metadata in digiKam's database
-  (tags, rating, caption, GPS: digiKam's current state wins,
-  so a stale sidecar left next to a file cannot override fresh
-  edits), merged over whatever XMP the file already carries
-  (its own sidecar, else its embedded packet) so properties
-  the generator does not set, digiKam's label properties
-  included, are preserved verbatim. When digiKam's database
-  holds nothing for an item, the file's own sidecar or
-  embedded packet travels as it stands.
-- Download: the selected album's or tag's originals and
-  sidecars are written into a chosen folder; files already on
-  disk are skipped, but their sidecars are refreshed (server
-  sidecar, or one generated from the Immich asset record:
-  tags, rating, caption, GPS), so metadata changes made in
-  Immich still reach digiKam on a re-download.
-- No duplicates for edited files: Immich identifies a
-  photo by content checksum, so a file whose bytes changed
-  (digiKam writes metadata into files, or the photo was
-  edited) would normally upload as a second copy. Before
-  uploading such a file, the plugin looks for the same photo
-  on the server: within the album being exported to, the
-  file name is the primary key, verified against capture
-  time and dimensions, with a library-wide search as a
-  second pass, and the pixels are compared with the server's
-  thumbnail. A metadata-only change uploads nothing: the
-  metadata sync below updates the existing asset. A real
-  edit (changed pixels, same capture time) uploads the new
-  version, puts it in every album the old copy belonged to,
-  syncs its metadata, and stacks it as the new primary over
-  the old copy, which stays in the library inside the stack
-  (repeated edits accumulate as a version stack, newest on
-  top). A crop changes the dimensions, so it matches on file
-  name and exact capture time alone, and only replaces
-  after a containment check confirms the local image really
-  is a crop of the server's photo. When the evidence is
-  ambiguous (no matching capture time, several candidates),
-  nothing is overwritten: the file uploads as new, or syncs
-  to the newest matching copy. See "Re-exporting: what to
-  expect" below for the full set of cases.
-- Metadata sync on export: a selected file the server
-  already has (checksum match) is not re-uploaded, but its
-  digiKam tags, rating, caption and GPS are diffed against
-  the server's asset record and only the differences are
-  written through the API (PUT /assets, the tags endpoints).
-  Tag sync is add-only: a tag removed in digiKam is not
-  removed in Immich, and a tag set in Immich is never deleted
-  by an export. Per-asset snapshots of the last sync are
-  kept (in digiKam's app data, immich-sync-state.json): when
-  both sides changed a photo's scalars since then, the newer
-  change wins by timestamp and the run reports it as a
-  conflict; when only Immich changed, the export leaves the
-  asset alone. Import refreshes write a local sidecar only
-  when its content actually differs.
-- Both transfers run item by item with a progress bar and a
-  summary (done / skipped / failed counts).
-- Caching: thumbnails (album covers and contents previews)
-  are kept on disk in digiKam's cache directory and reused
-  across sessions, pruned oldest-first past roughly 200 MB.
-  While the album list loads, a spinner overlays the album
-  area. Contents listings are cached for the session; Refresh is
-  the invalidation, and an upload drops its target album's
-  cached listing only when the album actually gained assets.
+- Two tools sharing one window: "Export to Immich..." uploads
+  digiKam's current selection; "Import from Immich..."
+  downloads an album or every asset carrying a tag.
+- Server URL and API key are stored in digiKam's
+  configuration (KConfig group "Immich Settings").
+- Sources are album and tag tiles, sorted by name, with a
+  filter box; selecting one previews its contents as sortable
+  thumbnails. A spinner overlays the album area while the
+  album list loads.
+- Export target is a radio choice, remembered between runs:
+  Library only (the default) or the selected album.
+- Uploads carry an XMP sidecar generated from digiKam's
+  database metadata (tags, rating, caption, GPS), merged
+  over the file's existing XMP so properties it does not set,
+  labels included, survive.
+- Downloads write originals and sidecars into a chosen
+  folder. Files already on disk are skipped, but their
+  sidecars are refreshed, so metadata changed in Immich
+  still reaches digiKam.
+- Re-exporting an edited photo never creates a duplicate:
+  the file is recognised on the server and its changes are
+  synced or used to replace the old copy (see below).
+- Files the server already has are not re-uploaded; their
+  metadata is diffed and only the differences are written,
+  with tags add-only.
+- Transfers run with a progress bar and end with a one-line
+  summary of outcome counts.
+- Thumbnails are cached on disk (about 200 MB, oldest pruned
+  first); album contents are cached for the session, with
+  Refresh as the invalidation.
 
 ## Re-exporting: what to expect
 
-Exporting the same selection twice is safe, and editing a
-photo in digiKam between exports does not create duplicates
-in Immich. What happens to each file depends on what changed:
+Re-exporting the same selection is safe: what happens to
+each file depends on what changed since the last export.
+Recognition uses the file name, capture time and dimensions,
+confirmed by comparing pixels with the server's thumbnail;
+per-asset snapshots of the last sync (in digiKam's app data)
+decide which side changed.
 
-- **Nothing changed.** The file's checksum matches the
-  server's copy. Nothing is uploaded; the metadata sync runs
-  and normally finds nothing to write.
-- **Only metadata changed** (tags, rating, caption, GPS),
-  whether digiKam kept it in its database or wrote it into
-  the file. The photo is recognised by file name (within the
-  album being exported to), capture time and dimensions, and
-  its pixels compare identical to the server's copy. Nothing
-  is uploaded; the changed metadata is written to the
-  existing Immich asset through the API.
-- **The picture itself was edited** (colour, retouching, any
-  change that alters pixels), with the same capture time.
-  The new version is uploaded and added to every album the
-  old copy belonged to. What happens to the old copy is the
-  "Edited photos:" choice in the export window: **Stack**
-  (the default) makes the new version the primary of a stack
-  over the old copy, which is not deleted: it stays in the
-  stack, visible in Immich's stack view, and repeated edits
-  keep adding versions, newest on top. **Overwrite** sends
-  the old copy to Immich's trash instead (recoverable for 30
-  days). Metadata-only changes never reach this choice: they
-  always sync onto the existing asset, as above. Either way,
-  the replaced asset is a new asset, so the old copy's
-  shared links do not carry over, its face assignments
-  re-derive from recognition, and any edits made with
-  Immich's own editor on the old copy do not transfer.
-- **The photo was cropped or resized.** Dimensions no longer
-  match, so recognition rests on the file name and the exact
-  capture time, and the new version replaces only after a
-  containment check confirms the local image is really a
-  crop of the server's photo. It is then stacked like any
-  other edit.
-- **The evidence is ambiguous.** A different photo that
-  merely shares a file name, a missing or unmatched capture
-  time, or a failed containment check means nothing is
-  overwritten and nothing is stacked: the file uploads as a
-  new photo. When a photo already has several copies on the
-  server, the newest is the match.
+- **Nothing changed.** Checksum match: nothing is uploaded,
+  and the metadata sync normally finds nothing to write.
+- **Only metadata changed.** The pixels compare identical,
+  so nothing is uploaded; the changed tags, rating, caption
+  and GPS are written to the existing asset through the API.
+  When both sides changed since the last sync, tags merge
+  and scalars go to the newer side by timestamp, reported
+  as a conflict; when only Immich changed, the asset is
+  left alone.
+- **The picture itself was edited.** The new version is
+  uploaded into every album the old copy belonged to. The
+  "Edited photos:" choice decides the old copy: **Stack**
+  (the default) puts the new version on top of it as a stack
+  primary; **Overwrite** sends it to Immich's trash
+  (recoverable for 30 days). The replacement is a new asset:
+  shared links do not carry over, face assignments
+  re-derive, and Immich-editor edits on the old copy are
+  lost.
+- **The photo was cropped or resized.** Dimensions no
+  longer match, so recognition rests on file name and exact
+  capture time, and it replaces only after a containment
+  check confirms the local image is a crop of the server's
+  photo.
+- **The evidence is ambiguous.** Nothing is overwritten or
+  stacked; the file uploads as a new photo. With several
+  copies on the server, the newest is the match.
 
-The run summary at the end of an export is a single line of
-outcome counts: how many items were uploaded (with any
-replacements noted as stacked or overwritten), how many
-were already in Immich, what the metadata sync changed or
-found unchanged, any conflicts settled by timestamp, and
-the failure count.
+Good to know:
 
-Expectations to know before relying on this:
-
-- Recognition needs the file name and the EXIF capture time
-  to survive the edit. Both do in digiKam's normal editing
-  flow; a file that was renamed, or whose capture time was
-  rewritten, is treated as a new photo.
-- RAW files and other formats the plugin cannot decode get
-  the benefit of the doubt: their pixels count as unchanged,
-  so their metadata syncs and they are never replaced or
-  stacked by an export. A developed version of a RAW photo is
-  a different file and uploads as its own photo.
-- Tag sync is add-only in both the metadata sync and the
-  sidecars: removing a tag in digiKam does not remove it in
-  Immich.
-- Stacking needs the `stack.create` and `stack.read` API key
-  permissions. If the server refuses to stack, the replace
-  falls back to moving the old copy to Immich's trash
-  (recoverable for 30 days, needs `asset.delete`) rather
-  than leaving two loose copies. The Overwrite choice needs
-  `asset.delete` directly.
+- Recognition needs the file name and EXIF capture time to
+  survive the edit; a renamed file counts as new.
+- Files the plugin cannot decode (RAW and similar) count
+  as unchanged pixels: their metadata syncs and they are
+  never replaced or stacked.
+- Tag sync is add-only everywhere: removing a tag in
+  digiKam does not remove it in Immich.
+- Stacking needs `stack.create` and `stack.read`; if the
+  server refuses, the old copy falls back to the trash
+  (needs `asset.delete`). Overwrite needs `asset.delete`
+  directly.
 
 ## Server and API key
 
