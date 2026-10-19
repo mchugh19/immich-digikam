@@ -87,7 +87,8 @@ digiKam's own web-service plugins (Piwigo in particular).
 - Caching: thumbnails (album covers and contents previews)
   are kept on disk in digiKam's cache directory and reused
   across sessions, pruned oldest-first past roughly 200 MB.
-  Contents listings are cached for the session; Refresh is
+  While the album list loads, a spinner overlays the album
+  area. Contents listings are cached for the session; Refresh is
   the invalidation, and an upload drops its target album's
   cached listing only when the album actually gained assets.
 
@@ -134,12 +135,14 @@ in Immich. What happens to each file depends on what changed:
   time, or a failed containment check means nothing is
   overwritten and nothing is stacked: the file uploads as a
   new photo. When a photo already has several copies on the
-  server, the newest is the match and the summary says so.
+  server, the newest is the match.
 
-The run summary at the end of an export reports each of
-these outcomes with its own count: uploaded, already on the
-server, matched (metadata synced instead of re-uploading),
-replaced and stacked, and conflicts settled by timestamp.
+The run summary at the end of an export is a single line of
+outcome counts: how many items were uploaded (with any
+replacements noted as stacked or overwritten), how many
+were already in Immich, what the metadata sync changed or
+found unchanged, any conflicts settled by timestamp, and
+the failure count.
 
 Expectations to know before relying on this:
 

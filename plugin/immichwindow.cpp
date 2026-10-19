@@ -1976,76 +1976,97 @@ void ImmichWindow::slotAssetsDeleted(int httpStatus)
 
 void ImmichWindow::printUploadSummary()
 {
-    QString text = d->albumAssigned
-        ? i18n("Uploaded %1 of %2 items (%3 already on the server, %4 failed) and added them to the album.")
-        : i18n("Uploaded %1 of %2 items (%3 already on the server, %4 failed).");
+    // One line, outcome counts only. The mechanisms that used
+    // to append their own sentences here (identity matching,
+    // the metadata sync, the replace handling) overlap in their
+    // counts, so reporting each separately produced a paragraph
+    // that contradicted itself; here every outcome is counted
+    // once, in the order it happened.
+    const int uploaded = qMax(0, d->done - d->failed - d->alreadyThere);
 
-    text = text.arg(d->done - d->failed - d->alreadyThere)
-               .arg(d->total)
-               .arg(d->alreadyThere)
-               .arg(d->failed);
+    QString uploadedPart = i18n("%1 uploaded").arg(uploaded);
 
-    if (d->matchedSync > 0)
+    if (d->stackedCount > 0 || d->overwriteCount > 0 || d->trashFallbackCount > 0)
     {
-        text += i18np(" %1 photo synced metadata.",
-                      " %1 photos synced metadata.", d->matchedSync);
+        QStringList details;
 
-        if (d->matchedMulti > 0)
+        if (d->stackedCount > 0)
         {
-            text += i18n(" (%1 had several copies on the server; the newest was used.)")
-                        .arg(d->matchedMulti);
+            details << i18n("%1 stacked").arg(d->stackedCount);
         }
+
+        if (d->overwriteCount > 0)
+        {
+            details << i18n("%1 overwritten").arg(d->overwriteCount);
+        }
+
+        if (d->trashFallbackCount > 0)
+        {
+            details << i18np("%1 could not be stacked, old copy in trash",
+                             "%1 could not be stacked, old copies in trash",
+                             d->trashFallbackCount);
+        }
+
+        uploadedPart += QStringLiteral(" (") + details.join(QStringLiteral(", "))
+                        + QStringLiteral(")");
     }
 
-    if (d->stackedCount > 0)
-    {
-        text += i18np(" %1 edited photo replaced its Immich copy,"
-                      " stacked as the new primary over the previous version.",
-                      " %1 edited photos replaced their Immich copies,"
-                      " stacked as the new primary over the previous version.",
-                      d->stackedCount);
-    }
-
-    if (d->overwriteCount > 0)
-    {
-        text += i18np(" %1 edited photo replaced its Immich copy"
-                      " (the old copy is in Immich's trash).",
-                      " %1 edited photos replaced their Immich copies"
-                      " (the old copies are in Immich's trash).",
-                      d->overwriteCount);
-    }
-
-    if (d->trashFallbackCount > 0)
-    {
-        text += i18np(" %1 replaced photo could not be stacked;"
-                      " its old copy is in Immich's trash.",
-                      " %1 replaced photos could not be stacked;"
-                      " their old copies are in Immich's trash.",
-                      d->trashFallbackCount);
-    }
+    QStringList parts;
+    parts << uploadedPart;
+    parts << i18n("%1 already in Immich").arg(d->alreadyThere);
 
     if (d->syncRan)
     {
-        text += i18n(" Metadata synced for %1 already-uploaded items (%2 unchanged, %3 failed).")
-                    .arg(d->syncUpdated)
-                    .arg(d->syncClean)
-                    .arg(d->syncFailed);
+        if (d->syncUpdated > 0 && d->syncClean > 0)
+        {
+            parts << i18n("%1 metadata updated, %2 unchanged")
+                         .arg(d->syncUpdated)
+                         .arg(d->syncClean);
+        }
+        else if (d->syncUpdated > 0)
+        {
+            parts << i18n("%1 metadata updated").arg(d->syncUpdated);
+        }
+        else if (d->syncClean > 0 && !d->syncPermsDenied)
+        {
+            parts << i18n("metadata unchanged");
+        }
 
         if (d->syncConflicts > 0)
         {
-            text += i18np(" %1 conflict settled by timestamp.",
-                            " %1 conflicts settled by timestamp.",
-                            d->syncConflicts);
+            parts << i18np("%1 conflict settled by timestamp",
+                           "%1 conflicts settled by timestamp",
+                           d->syncConflicts);
         }
 
         if (d->syncPermsDenied)
         {
-            text += i18n(" Metadata sync was refused: the API key also needs"
-                                   " asset.update, tag.create and tag.asset.");
+            parts << i18n("metadata sync refused: the API key needs"
+                          " asset.update, tag.create and tag.asset");
         }
     }
 
-    d->status->setText(text);
+    if (d->albumAssigned)
+    {
+        parts << i18n("album updated");
+    }
+
+    // A permission refusal already explains its failures; do
+    // not count them twice.
+    const int failedTotal = d->failed + (d->syncPermsDenied ? 0 : d->syncFailed);
+
+    if (failedTotal > 0)
+    {
+        parts << i18np("%1 failure", "%1 failures", failedTotal);
+    }
+    else
+    {
+        parts << i18n("no failures");
+    }
+
+    const QString prefix = i18np("%1 item", "%1 items", d->total);
+    d->status->setText(prefix + QStringLiteral(": ")
+                       + parts.join(QStringLiteral(", ")) + QStringLiteral("."));
 }
 
 void ImmichWindow::maybeStartSync()
