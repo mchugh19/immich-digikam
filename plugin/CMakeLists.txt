@@ -34,6 +34,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 find_package(KF6Config REQUIRED)
 find_package(KF6I18n REQUIRED)
 find_package(KF6Wallet REQUIRED)
+find_package(KF6KIO REQUIRED)
 
 # Provides the DPluginGeneric headers and the digiKam core library.
 # Target names and install paths verified against the installed
@@ -66,6 +67,7 @@ target_link_libraries(generic_immich
         KF6::ConfigCore
         KF6::I18n
         KF6::Wallet
+        KF6::KIOWidgets
 )
 
 install(TARGETS generic_immich

@@ -23,10 +23,11 @@ digiKam's own web-service plugins (Piwigo in particular).
   database metadata (tags, rating, caption, GPS), merged
   over the file's existing XMP so properties it does not set,
   labels included, survive.
-- Downloads write originals and sidecars into a chosen
-  folder. Files already on disk are skipped, but their
-  sidecars are refreshed, so metadata changed in Immich
-  still reaches digiKam.
+- Downloads write originals and sidecars into the folder
+  shown in the window's "Download to" field, remembered
+  between runs. Files already on disk are skipped, but
+  their sidecars are refreshed, so metadata changed in
+  Immich still reaches digiKam.
 - Re-exporting an edited photo never creates a duplicate:
   the file is recognised on the server and its changes are
   synced or used to replace the old copy (see below).

@@ -27,7 +27,6 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QFrame>
@@ -55,6 +54,8 @@
 
 // KDE includes
 
+#include <KFile>
+#include <KUrlRequester>
 #include <klocalizedstring.h>
 
 // Local includes
@@ -164,6 +165,7 @@ public:
     QPushButton*  refreshBtn  = nullptr;
     QPushButton*  newAlbumBtn = nullptr;
     QPushButton*  uploadBtn   = nullptr;
+    KUrlRequester* downloadDirEdit = nullptr;
     QPushButton*  downloadBtn = nullptr;
     QPushButton*  cancelBtn   = nullptr;
     QProgressBar* progress    = nullptr;
@@ -576,6 +578,16 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
     d->progress->setFixedHeight(18);
     d->status           = new QLabel;
 
+    // The download target lives in the window as a KDE URL
+    // requester (path field plus folder button), remembered
+    // between runs, instead of a modal folder dialog appearing
+    // every time Download is pressed.
+    d->downloadDirEdit = new KUrlRequester(this);
+    d->downloadDirEdit->setMode(KFile::Directory | KFile::LocalOnly | KFile::ExistingOnly);
+    d->downloadDirEdit->setUrl(QUrl::fromLocalFile(
+        d->session->downloadDir().isEmpty() ? QDir::homePath()
+                                            : d->session->downloadDir()));
+
     // Each tool shows only its own direction's actions. The source
     // switch and the contents preview belong to the import tool;
     // the filter serves the source list in both.
@@ -664,6 +676,15 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
 
     layout->addWidget(d->targetLabel);
     layout->addWidget(d->uploadBtn);
+
+    if (d->mode == Mode::Import)
+    {
+        auto* const downloadDirRow = new QHBoxLayout;
+        downloadDirRow->addWidget(new QLabel(i18n("Download to:")));
+        downloadDirRow->addWidget(d->downloadDirEdit, 1);
+        layout->addLayout(downloadDirRow);
+    }
+
     layout->addWidget(d->downloadBtn);
 
     // The progress bar and Cancel share one always-present
@@ -2594,13 +2615,11 @@ void ImmichWindow::slotDownloadAlbum()
         return;
     }
 
-    const QString startDir = d->session->downloadDir().isEmpty() ? QDir::homePath()
-                                                                 : d->session->downloadDir();
-    const QString dir = QFileDialog::getExistingDirectory(
-        this, i18n("Download to"), startDir);
+    const QString dir = d->downloadDirEdit->url().toLocalFile();
 
     if (dir.isEmpty())
     {
+        d->status->setText(i18n("Choose a download folder first."));
         return;
     }
 
