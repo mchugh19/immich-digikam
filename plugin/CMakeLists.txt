@@ -33,6 +33,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 # KF6 ships no umbrella config; each framework is its own package.
 find_package(KF6Config REQUIRED)
 find_package(KF6I18n REQUIRED)
+find_package(KF6Wallet REQUIRED)
 
 # Provides the DPluginGeneric headers and the digiKam core library.
 # Target names and install paths verified against the installed
@@ -64,6 +65,7 @@ target_link_libraries(generic_immich
         Qt6::Network
         KF6::ConfigCore
         KF6::I18n
+        KF6::Wallet
 )
 
 install(TARGETS generic_immich

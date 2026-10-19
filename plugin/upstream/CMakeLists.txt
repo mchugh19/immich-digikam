@@ -20,6 +20,7 @@ include_directories($<TARGET_PROPERTY:Qt6::Widgets,INTERFACE_INCLUDE_DIRECTORIES
 
                     $<TARGET_PROPERTY:KF6::ConfigCore,INTERFACE_INCLUDE_DIRECTORIES>
                     $<TARGET_PROPERTY:KF6::I18n,INTERFACE_INCLUDE_DIRECTORIES>
+                    $<TARGET_PROPERTY:KF6::Wallet,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
 set(immichplugin_SRCS
@@ -38,6 +39,7 @@ qt_add_resources(immichplugin_RCC_SRCS
 
 DIGIKAM_ADD_GENERIC_PLUGIN(NAME    Immich
                            SOURCES ${immichplugin_SRCS} ${immichplugin_RCC_SRCS}
+                           DEPENDS KF6::Wallet
 )
 
 add_subdirectory(icons)

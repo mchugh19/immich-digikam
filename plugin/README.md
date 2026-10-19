@@ -10,8 +10,9 @@ digiKam's own web-service plugins (Piwigo in particular).
 - Two tools sharing one window: "Export to Immich..." uploads
   digiKam's current selection; "Import from Immich..."
   downloads an album or every asset carrying a tag.
-- Server URL and API key are stored in digiKam's
-  configuration (KConfig group "Immich Settings").
+- Server URL and other settings are stored in digiKam's
+  configuration; the API key is stored in KWallet, with the
+  configuration as fallback when no wallet is available.
 - Sources are album and tag tiles, sorted by name, with a
   filter box; selecting one previews its contents as sortable
   thumbnails. A spinner overlays the album area while the

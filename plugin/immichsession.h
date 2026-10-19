@@ -24,8 +24,10 @@ namespace DigikamGenericImmichPlugin
 
 /**
  * Connection settings for one Immich server: base URL and API key.
- * Persisted in digiKam's configuration (group "Immich Settings"),
- * the same way digiKam's other web-service plugins keep theirs.
+ * The non-secret settings are persisted in digiKam's configuration
+ * (group "Immich Settings"). The API key is stored in KWallet when
+ * a wallet is available, with the same configuration group kept
+ * only as a fallback for systems where the wallet cannot be used.
  *
  * The API key needs these permissions on the Immich server
  * (names as of Immich 3.3.3):

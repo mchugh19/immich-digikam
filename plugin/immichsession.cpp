@@ -18,11 +18,77 @@
 
 // KDE includes
 
+#include <KWallet>
 #include <kconfiggroup.h>
 #include <ksharedconfig.h>
 
+// Std includes
+
+#include <memory>
+
 namespace DigikamGenericImmichPlugin
 {
+
+namespace
+{
+
+const QString walletFolder = QStringLiteral("digiKam Immich");
+const QString walletEntry  = QStringLiteral("ApiKey");
+
+KWallet::Wallet* openWallet()
+{
+    return KWallet::Wallet::openWallet(KWallet::Wallet::NetworkWallet(),
+                                       0, KWallet::Wallet::Synchronous);
+}
+
+bool readWalletApiKey(QString& apiKey)
+{
+    if (KWallet::Wallet::keyDoesNotExist(KWallet::Wallet::NetworkWallet(),
+                                          walletFolder, walletEntry))
+    {
+        return false;
+    }
+
+    const std::unique_ptr<KWallet::Wallet> wallet(openWallet());
+
+    if (!wallet || !wallet->hasFolder(walletFolder)
+        || !wallet->setFolder(walletFolder))
+    {
+        return false;
+    }
+
+    return wallet->readPassword(walletEntry, apiKey) == 0;
+}
+
+bool writeWalletApiKey(const QString& apiKey)
+{
+    const std::unique_ptr<KWallet::Wallet> wallet(openWallet());
+
+    if (!wallet)
+    {
+        return false;
+    }
+
+    if (!wallet->hasFolder(walletFolder) && !wallet->createFolder(walletFolder))
+    {
+        return false;
+    }
+
+    if (!wallet->setFolder(walletFolder))
+    {
+        return false;
+    }
+
+    if (apiKey.isEmpty())
+    {
+        return !wallet->hasEntry(walletEntry)
+               || wallet->removeEntry(walletEntry) == 0;
+    }
+
+    return wallet->writePassword(walletEntry, apiKey) == 0;
+}
+
+} // namespace
 
 class ImmichSession::Private
 {
@@ -99,7 +165,20 @@ void ImmichSession::save()
 {
     KConfigGroup group = KSharedConfig::openConfig()->group(QStringLiteral("Immich Settings"));
     group.writeEntry("ServerUrl", d->url);
-    group.writeEntry("ApiKey", d->apiKey);
+
+    // Prefer KWallet for the secret. The plaintext config entry is
+    // only a fallback for a wallet that cannot be opened or written;
+    // whenever the wallet takes the key, any old config copy is
+    // removed so the secret does not live in both places.
+    if (writeWalletApiKey(d->apiKey) || d->apiKey.isEmpty())
+    {
+        group.deleteEntry("ApiKey");
+    }
+    else
+    {
+        group.writeEntry("ApiKey", d->apiKey);
+    }
+
     group.writeEntry("DownloadDir", d->downloadDir);
     group.writeEntry("ReplaceMode", d->replaceMode);
     group.writeEntry("ExportTargetMode", d->exportTargetMode);
@@ -109,8 +188,35 @@ void ImmichSession::save()
 void ImmichSession::load()
 {
     KConfigGroup group = KSharedConfig::openConfig()->group(QStringLiteral("Immich Settings"));
-    d->url         = group.readEntry("ServerUrl", QString());
-    d->apiKey      = group.readEntry("ApiKey", QString());
+    d->url = group.readEntry("ServerUrl", QString());
+
+    // The wallet wins when it has the key. A legacy plaintext entry
+    // is used only when the wallet has none, and is migrated into
+    // the wallet (and removed from the config) when it can be.
+    const QString configApiKey = group.readEntry("ApiKey", QString());
+    QString       walletApiKey;
+
+    if (readWalletApiKey(walletApiKey))
+    {
+        d->apiKey = walletApiKey;
+
+        if (!configApiKey.isEmpty())
+        {
+            group.deleteEntry("ApiKey");
+            group.sync();
+        }
+    }
+    else
+    {
+        d->apiKey = configApiKey;
+
+        if (!configApiKey.isEmpty() && writeWalletApiKey(configApiKey))
+        {
+            group.deleteEntry("ApiKey");
+            group.sync();
+        }
+    }
+
     d->downloadDir = group.readEntry("DownloadDir", QString());
     setReplaceMode(group.readEntry("ReplaceMode", QStringLiteral("stack")));
     setExportTargetMode(group.readEntry("ExportTargetMode", QStringLiteral("library")));
