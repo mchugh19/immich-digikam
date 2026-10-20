@@ -85,7 +85,9 @@ void ImmichWindow::fillUploadPreview()
     blank.fill(Qt::transparent);
     const QIcon placeholder(blank);
 
-    for (const QUrl& url : d->iface->currentSelectedItems())
+    const QList<QUrl> selected = d->iface->currentSelectedItems();
+
+    for (const QUrl& url : selected)
     {
         const QString path = url.toLocalFile();
         auto* const item = new QListWidgetItem(QFileInfo(path).fileName(), d->previewList);

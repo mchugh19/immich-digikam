@@ -145,13 +145,17 @@ inline QString mergeSidecarPackets(const QString& generated,
                 ++depth;
                 preserved += QLatin1Char('<') + reader.qualifiedName().toString();
 
-                for (const QXmlStreamNamespaceDeclaration& decl : reader.namespaceDeclarations())
+                const QXmlStreamNamespaceDeclarations decls = reader.namespaceDeclarations();
+
+                for (const QXmlStreamNamespaceDeclaration& decl : decls)
                 {
                     preserved += QStringLiteral(" xmlns:%1=\"%2\"")
                                      .arg(decl.prefix().toString(), escAttr(decl.namespaceUri().toString()));
                 }
 
-                for (const QXmlStreamAttribute& attr : reader.attributes())
+                const QXmlStreamAttributes attrs = reader.attributes();
+
+                for (const QXmlStreamAttribute& attr : attrs)
                 {
                     preserved += QStringLiteral(" %1=\"%2\"")
                                      .arg(attr.qualifiedName().toString(), escAttr(attr.value().toString()));
@@ -190,7 +194,9 @@ inline QString mergeSidecarPackets(const QString& generated,
             continue;
         }
 
-        for (const QXmlStreamNamespaceDeclaration& decl : reader.namespaceDeclarations())
+        const QXmlStreamNamespaceDeclarations decls = reader.namespaceDeclarations();
+
+        for (const QXmlStreamNamespaceDeclaration& decl : decls)
         {
             const QString prefix = decl.prefix().toString();
 
@@ -209,7 +215,9 @@ inline QString mergeSidecarPackets(const QString& generated,
 
         // Attributes on the description itself, minus the ones
         // the generated packet sets.
-        for (const QXmlStreamAttribute& attr : reader.attributes())
+        const QXmlStreamAttributes attrs = reader.attributes();
+
+        for (const QXmlStreamAttribute& attr : attrs)
         {
             const QString name = attr.qualifiedName().toString();
 

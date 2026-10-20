@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -113,7 +114,7 @@ void ImmichWindow::slotSyncRecord(const QString& assetId, const QJsonObject& rec
 
     const Private::SyncJob* job = nullptr;
 
-    for (const Private::SyncJob& candidate : d->syncJobs)
+    for (const Private::SyncJob& candidate : std::as_const(d->syncJobs))
     {
         if (candidate.assetId == assetId)
         {
@@ -177,7 +178,7 @@ void ImmichWindow::slotSyncRecord(const QString& assetId, const QJsonObject& rec
 
     ctx.plan = plan;
 
-    for (const QString& tag : plan.tagsToAdd)
+    for (const QString& tag : std::as_const(plan.tagsToAdd))
     {
         d->syncTagAdds[tag].append(assetId);
         ctx.wrote = true;
@@ -258,7 +259,7 @@ void ImmichWindow::finishSyncAsset(const QString& assetId)
 
     const Private::SyncJob* job = nullptr;
 
-    for (const Private::SyncJob& candidate : d->syncJobs)
+    for (const Private::SyncJob& candidate : std::as_const(d->syncJobs))
     {
         if (candidate.assetId == assetId)
         {

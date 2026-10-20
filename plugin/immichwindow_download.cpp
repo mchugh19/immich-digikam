@@ -323,8 +323,9 @@ bool ImmichWindow::writeRecordSidecar(const QString& targetFile, const QJsonObje
     const QJsonObject exif = record.value(QStringLiteral("exifInfo")).toObject();
 
     QStringList tags;
+    const QJsonArray tagItems = record.value(QStringLiteral("tags")).toArray();
 
-    for (const QJsonValue& value : record.value(QStringLiteral("tags")).toArray())
+    for (const QJsonValue& value : tagItems)
     {
         const QJsonObject tag = value.toObject();
         QString           name = tag.value(QStringLiteral("value")).toString();

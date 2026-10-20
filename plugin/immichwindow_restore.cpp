@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -244,7 +245,12 @@ void ImmichWindow::slotAssetsDeleted(int httpStatus)
         d->trashFallbackCount = d->restoreTrashQueue.size();
         d->overwriteCount     = d->overwriteQueue.size();
 
-        for (const QString& oldId : d->restoreTrashQueue + d->overwriteQueue)
+        for (const QString& oldId : std::as_const(d->restoreTrashQueue))
+        {
+            d->syncState.remove(oldId);
+        }
+
+        for (const QString& oldId : std::as_const(d->overwriteQueue))
         {
             d->syncState.remove(oldId);
         }

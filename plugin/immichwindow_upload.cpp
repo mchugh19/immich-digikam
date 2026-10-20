@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -180,7 +181,7 @@ void ImmichWindow::slotUploadCheck(const QMap<QString, QString>& duplicatesByPat
 
     QList<QUrl> remaining;
 
-    for (const QUrl& url : d->pending)
+    for (const QUrl& url : std::as_const(d->pending))
     {
         const QString assetId = duplicatesByPath.value(url.toLocalFile());
 

@@ -15,6 +15,8 @@
 #include <QVariant>
 #include <QtGlobal>
 
+#include <utility>
+
 namespace DigikamGenericImmichPlugin
 {
 
@@ -50,7 +52,9 @@ inline ServerFields serverFieldsFromRecord(const QJsonObject& record)
     ServerFields out;
     const QJsonObject exif = record.value(QStringLiteral("exifInfo")).toObject();
 
-    for (const QJsonValue& value : record.value(QStringLiteral("tags")).toArray())
+    const QJsonArray tagsJson = record.value(QStringLiteral("tags")).toArray();
+
+    for (const QJsonValue& value : tagsJson)
     {
         const QJsonObject tag = value.toObject();
         QString           name = tag.value(QStringLiteral("value")).toString();
@@ -388,7 +392,7 @@ inline IdentityMatch chooseIdentityMatch(const QList<IdentityCandidate>& candida
 
     const IdentityCandidate* best = &pool.constFirst();
 
-    for (const IdentityCandidate& c : pool)
+    for (const IdentityCandidate& c : std::as_const(pool))
     {
         if (c.createdAt > best->createdAt)
         {
