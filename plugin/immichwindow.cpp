@@ -163,6 +163,10 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // digiKam is exported again: stack the new version over it
     // (nothing is deleted) or overwrite it (old copy to trash).
     // Metadata-only changes never reach this choice: they sync.
+    // The choice configures the upload, not the connection, so
+    // its row gets a form of its own: the window layout places
+    // it below the separator, as the first row of the working
+    // section, next to the upload controls it belongs with.
     d->replaceCombo = new QComboBox;
     d->replaceCombo->addItem(i18n("Stack the new version over the old"),
                              QStringLiteral("stack"));
@@ -170,7 +174,8 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
                              QStringLiteral("trash"));
     d->replaceCombo->setCurrentIndex(
         d->session->replaceMode() == QStringLiteral("trash") ? 1 : 0);
-    form->addRow(i18n("Edited photos:"), d->replaceCombo);
+    auto* const editForm = new QFormLayout;
+    editForm->addRow(i18n("Edited photos:"), d->replaceCombo);
 
     auto* const saveBtn = new QPushButton(i18n("Save settings"));
     d->connectBtn       = new QPushButton(i18n("Connect"));
@@ -313,7 +318,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     d->targetLabel->setVisible(d->mode == Mode::Export);
     // Hide the whole form row, not just the combo: setVisible on
     // the field alone leaves its "Edited photos:" label behind.
-    form->setRowVisible(d->replaceCombo, d->mode == Mode::Export);
+    editForm->setRowVisible(d->replaceCombo, d->mode == Mode::Export);
     d->newAlbumBtn->setVisible(d->mode == Mode::Export);
 
     auto* const sourceRow = new QHBoxLayout;
@@ -357,6 +362,11 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     separator->setFrameShadow(QFrame::Sunken);
     layout->addWidget(separator);
     layout->addSpacing(8);
+
+    // First row below the rule: the Edited photos choice, an
+    // upload setting rather than a connection one. In Import
+    // mode its only row is hidden, so the form collapses away.
+    layout->addLayout(editForm);
 
     if (d->mode == Mode::Export)
     {
@@ -672,6 +682,7 @@ void ImmichWindow::updateConnectionUi()
 
     d->refreshBtn->setEnabled(on && idle);
     d->newAlbumBtn->setEnabled(on && !d->sourceIsTags);
+    d->replaceCombo->setEnabled(on);
     d->filterEdit->setEnabled(on);
     d->albumArea->setEnabled(on);
     d->tagGrid->setEnabled(on);
