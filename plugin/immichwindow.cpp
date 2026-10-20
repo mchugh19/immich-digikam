@@ -346,11 +346,17 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     settingsBtnRow->addStretch();
     layout->addLayout(settingsBtnRow);
 
-    // A rule between the server settings and the working view.
+    // A rule between the server settings and the working view,
+    // with air around it: the hairline alone, wedged directly
+    // between the button row and the next section at the layout's
+    // normal spacing, does not read as a break, so the connection
+    // block gets a clear visual separation from what follows.
+    layout->addSpacing(8);
     auto* const separator = new QFrame;
     separator->setFrameShape(QFrame::HLine);
     separator->setFrameShadow(QFrame::Sunken);
     layout->addWidget(separator);
+    layout->addSpacing(8);
 
     if (d->mode == Mode::Export)
     {
