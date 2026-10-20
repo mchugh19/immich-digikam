@@ -308,7 +308,7 @@ void ImmichWindow::slotSourceChanged()
     }
 
     d->sourceIsTags = tags;
-    d->newAlbumBtn->setEnabled(!tags);
+    d->newAlbumBtn->setEnabled(!tags && d->connected);
     d->albumArea->setVisible(!tags);
     d->tagGrid->setVisible(tags);
     d->albumGrid->clear();
@@ -370,6 +370,9 @@ void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
         handleSyncTagList(tags);
         return;
     }
+
+    // A listing came back: the connection works.
+    setConnected(true);
 
     const QString restoreId = currentSourceId();
 
@@ -442,6 +445,9 @@ void ImmichWindow::slotAlbumCreated(const ImmichAlbum& album)
 void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
 {
     setAlbumLoading(false);
+
+    // A listing came back: the connection works.
+    setConnected(true);
 
     const QString restoreId = !d->pendingSelectId.isEmpty() ? d->pendingSelectId
                                                             : currentSourceId();

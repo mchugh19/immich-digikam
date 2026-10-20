@@ -173,6 +173,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     form->addRow(i18n("Edited photos:"), d->replaceCombo);
 
     auto* const saveBtn = new QPushButton(i18n("Save settings"));
+    d->connectBtn       = new QPushButton(i18n("Connect"));
     d->refreshBtn       = new QPushButton(i18n("Refresh albums"));
     d->newAlbumBtn      = new QPushButton(i18n("New album..."));
     d->cancelBtn        = new QPushButton(i18n("Cancel transfer"));
@@ -181,6 +182,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // Standard theme icons, the ones digiKam's own dialogs use
     // for the same actions, so the window sits naturally in the
     // host's icon theme.
+    d->connectBtn->setIcon(QIcon::fromTheme(QStringLiteral("network-connect")));
     saveBtn->setIcon(QIcon::fromTheme(QStringLiteral("document-save")));
     d->refreshBtn->setIcon(QIcon::fromTheme(QStringLiteral("view-refresh")));
     d->newAlbumBtn->setIcon(QIcon::fromTheme(QStringLiteral("folder-new")));
@@ -289,7 +291,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     d->libraryRadio->setChecked(!d->albumRadio->isChecked());
     d->progress         = new QProgressBar;
     d->progress->setFixedHeight(18);
-    d->status           = new QLabel;
+    d->status           = new QLabel(i18n("Enter the Immich server URL and API key, then click Connect."));
 
     // The download target lives in the window as a KDE URL
     // requester (path field plus folder button), remembered
@@ -335,6 +337,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // The settings actions sit with the settings they belong to,
     // at natural width, instead of stretching across the dialog.
     auto* const settingsBtnRow = new QHBoxLayout;
+    settingsBtnRow->addWidget(d->connectBtn);
     settingsBtnRow->addWidget(saveBtn);
     settingsBtnRow->addWidget(d->refreshBtn);
     settingsBtnRow->addWidget(d->newAlbumBtn);
@@ -430,6 +433,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     connect(startButton(), &QPushButton::clicked, this,
             d->mode == Mode::Export ? &ImmichWindow::slotUploadSelection
                                     : &ImmichWindow::slotDownloadAlbum);
+    connect(d->connectBtn, &QPushButton::clicked, this, &ImmichWindow::slotConnect);
     connect(saveBtn, &QPushButton::clicked, this, &ImmichWindow::slotSaveSettings);
     connect(d->refreshBtn, &QPushButton::clicked, this, &ImmichWindow::slotRefreshAlbums);
     connect(d->newAlbumBtn, &QPushButton::clicked, this, &ImmichWindow::slotNewAlbum);
@@ -527,6 +531,10 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     connect(d->talker, &ImmichTalker::signalStackFetched, this, &ImmichWindow::slotStackFetched);
     connect(d->talker, &ImmichTalker::signalError, this, &ImmichWindow::slotError);
     connect(d->talker, &ImmichTalker::signalBusy, this, &ImmichWindow::slotBusy);
+
+    // Nothing is connected yet: the sections below the
+    // connection settings start out disabled (waiting).
+    updateConnectionUi();
 }
 
 ImmichWindow::~ImmichWindow()
@@ -548,18 +556,28 @@ void ImmichWindow::showEvent(QShowEvent* event)
 
     // With credentials already stored, opening the tool is
     // intent enough: refresh the sources without making the
-    // user press Refresh first.
+    // user press Refresh first. Until the window has connected
+    // once, that refresh IS the connect attempt, so say so.
     if (!d->session->url().isEmpty() && !d->session->apiKey().isEmpty()
         && !d->uploading && !d->downloading)
     {
+        if (!d->connected)
+        {
+            d->connecting = true;
+            d->status->setText(i18n("Connecting..."));
+        }
+
         slotRefreshAlbums();
     }
 }
 
 void ImmichWindow::updateExportStatus()
 {
-    if (d->mode != Mode::Export || d->uploading)
+    if (d->mode != Mode::Export || d->uploading || !d->connected)
     {
+        // While unconnected the status line belongs to the
+        // connection state (the hint, "Connecting...", or the
+        // error that ended the attempt), not to the upload set.
         return;
     }
 
@@ -585,6 +603,78 @@ void ImmichWindow::slotSaveSettings()
     d->session->setApiKey(d->keyEdit->text());
     d->session->save();
     d->status->setText(i18n("Settings saved."));
+}
+
+void ImmichWindow::slotConnect()
+{
+    // The explicit first step. Validate the fields, save them
+    // (Connect is also how edited settings take effect), then
+    // load the sources: a listing that comes back proves the
+    // server is reachable and the API key is accepted, and it
+    // is what flips the window to its connected state
+    // (slotAlbums / slotTags). A failure lands in slotError
+    // with the window still unconnected.
+    const QUrl url(d->urlEdit->text().trimmed());
+
+    if (!url.isValid() || url.host().isEmpty()
+        || (url.scheme() != QStringLiteral("http")
+            && url.scheme() != QStringLiteral("https")))
+    {
+        d->status->setText(i18n("Enter a valid server URL (for example "
+                                "https://photos.example.com), then click Connect."));
+        return;
+    }
+
+    if (d->keyEdit->text().isEmpty())
+    {
+        d->status->setText(i18n("Enter an API key, then click Connect."));
+        return;
+    }
+
+    slotSaveSettings();
+    d->connecting = true;
+    d->status->setText(i18n("Connecting..."));
+    slotRefreshAlbums();
+}
+
+void ImmichWindow::setConnected(bool connected)
+{
+    d->connected  = connected;
+    d->connecting = false;
+    updateConnectionUi();
+
+    if (connected)
+    {
+        d->status->setText(i18n("Connected."));
+        // In the export tool the status line then carries the
+        // upload summary, as before.
+        updateExportStatus();
+    }
+}
+
+void ImmichWindow::updateConnectionUi()
+{
+    // Until the window is connected, everything below the
+    // connection settings reads as waiting: disabled rather
+    // than a blank form to guess at. The connection controls
+    // themselves (URL, API key, Connect, Save settings) always
+    // stay usable.
+    const bool on   = d->connected;
+    const bool idle = !d->uploading && !d->downloading;
+
+    d->refreshBtn->setEnabled(on && idle);
+    d->newAlbumBtn->setEnabled(on && !d->sourceIsTags);
+    d->filterEdit->setEnabled(on);
+    d->albumArea->setEnabled(on);
+    d->tagGrid->setEnabled(on);
+    d->previewList->setEnabled(on);
+    d->previewSort->setEnabled(on);
+    d->albumsSrc->setEnabled(on);
+    d->tagsSrc->setEnabled(on);
+    d->libraryRadio->setEnabled(on);
+    d->albumRadio->setEnabled(on);
+    d->downloadDirEdit->setEnabled(on);
+    startButton()->setEnabled(on && idle);
 }
 
 void ImmichWindow::applyTargetMode()
@@ -618,7 +708,8 @@ void ImmichWindow::setTransferButtonsEnabled(bool enabled)
 {
     d->refreshBtn->setEnabled(enabled);
     d->newAlbumBtn->setEnabled(enabled);
-    startButton()->setEnabled(enabled);
+    d->connectBtn->setEnabled(enabled);
+    startButton()->setEnabled(enabled && d->connected);
 }
 
 void ImmichWindow::slotCancelTransfer()
@@ -645,7 +736,13 @@ void ImmichWindow::slotError(const QString& msg)
     {
         // An idle-time error is the album list's failure mode:
         // the load is over either way, so the spinner stops.
+        // It also ends any connect attempt in flight; the
+        // window's connected state is unchanged (an attempt
+        // that fails before the first success leaves it
+        // unconnected, and a later refresh failing does not
+        // disconnect a working window).
         setAlbumLoading(false);
+        d->connecting = false;
     }
 
     if (d->cancelling)
@@ -722,7 +819,7 @@ void ImmichWindow::slotBusy(bool val)
 {
     if (!d->uploading && !d->downloading)
     {
-        d->refreshBtn->setEnabled(!val);
+        d->refreshBtn->setEnabled(!val && d->connected);
     }
 }
 

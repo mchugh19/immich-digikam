@@ -89,6 +89,7 @@ protected:
 private Q_SLOTS:
 
     void slotSaveSettings();
+    void slotConnect();
     void slotRefreshAlbums();
     void slotAlbums(const QList<ImmichAlbum>& albums);
     void slotTags(const QList<ImmichTag>& tags);
@@ -133,6 +134,8 @@ private Q_SLOTS:
 private:
 
     void setTransferButtonsEnabled(bool enabled);
+    void setConnected(bool connected);
+    void updateConnectionUi();
     void setAlbumLoading(bool loading);
     void applyFilter();
     QListWidgetItem* findAlbumItem(const QString& id) const;

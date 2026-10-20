@@ -144,6 +144,7 @@ public:
     QComboBox*    previewSort = nullptr;
     QLabel*       targetLabel = nullptr;
     QLabel*       status      = nullptr;
+    QPushButton*  connectBtn  = nullptr;
     QPushButton*  refreshBtn  = nullptr;
     QPushButton*  newAlbumBtn = nullptr;
     KUrlRequester* downloadDirEdit = nullptr;
@@ -229,6 +230,12 @@ public:
     int          dlSkipped     = 0;
     int          dlFailed      = 0;
     bool         downloading   = false;
+
+    // Connection state for the first-run flow: until a listing
+    // has been loaded successfully the window is unconnected
+    // and everything below the connection settings is disabled.
+    bool         connected     = false;
+    bool         connecting    = false;
     bool         dlListing     = false;
 
     // Metadata sync for files the upload check found already on
