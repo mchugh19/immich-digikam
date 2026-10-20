@@ -32,8 +32,20 @@ namespace DigikamGenericImmichPlugin
 namespace
 {
 
-const QString walletFolder = QStringLiteral("digiKam Immich");
-const QString walletEntry  = QStringLiteral("ApiKey");
+// Function-local statics, not namespace-scope QStrings: a
+// non-POD global is constructed before main() and destroyed
+// after it, which clazy rightly flags.
+const QString& walletFolder()
+{
+    static const QString folder = QStringLiteral("digiKam Immich");
+    return folder;
+}
+
+const QString& walletEntry()
+{
+    static const QString entry = QStringLiteral("ApiKey");
+    return entry;
+}
 
 KWallet::Wallet* openWallet()
 {
@@ -44,20 +56,20 @@ KWallet::Wallet* openWallet()
 bool readWalletApiKey(QString& apiKey)
 {
     if (KWallet::Wallet::keyDoesNotExist(KWallet::Wallet::NetworkWallet(),
-                                          walletFolder, walletEntry))
+                                          walletFolder(), walletEntry()))
     {
         return false;
     }
 
     const std::unique_ptr<KWallet::Wallet> wallet(openWallet());
 
-    if (!wallet || !wallet->hasFolder(walletFolder)
-        || !wallet->setFolder(walletFolder))
+    if (!wallet || !wallet->hasFolder(walletFolder())
+        || !wallet->setFolder(walletFolder()))
     {
         return false;
     }
 
-    return wallet->readPassword(walletEntry, apiKey) == 0;
+    return wallet->readPassword(walletEntry(), apiKey) == 0;
 }
 
 bool writeWalletApiKey(const QString& apiKey)
@@ -69,23 +81,23 @@ bool writeWalletApiKey(const QString& apiKey)
         return false;
     }
 
-    if (!wallet->hasFolder(walletFolder) && !wallet->createFolder(walletFolder))
+    if (!wallet->hasFolder(walletFolder()) && !wallet->createFolder(walletFolder()))
     {
         return false;
     }
 
-    if (!wallet->setFolder(walletFolder))
+    if (!wallet->setFolder(walletFolder()))
     {
         return false;
     }
 
     if (apiKey.isEmpty())
     {
-        return !wallet->hasEntry(walletEntry)
-               || wallet->removeEntry(walletEntry) == 0;
+        return !wallet->hasEntry(walletEntry())
+               || wallet->removeEntry(walletEntry()) == 0;
     }
 
-    return wallet->writePassword(walletEntry, apiKey) == 0;
+    return wallet->writePassword(walletEntry(), apiKey) == 0;
 }
 
 } // namespace
@@ -113,39 +125,39 @@ ImmichSession::~ImmichSession()
     delete d;
 }
 
-QString ImmichSession::url() const
+const QString& ImmichSession::url() const
 {
     return d->url;
 }
 
-QString ImmichSession::apiKey() const
+const QString& ImmichSession::apiKey() const
 {
     return d->apiKey;
 }
 
-QString ImmichSession::downloadDir() const
+const QString& ImmichSession::downloadDir() const
 {
     return d->downloadDir;
 }
 
-QString ImmichSession::replaceMode() const
+const QString& ImmichSession::replaceMode() const
 {
     return d->replaceMode;
 }
 
-QString ImmichSession::exportTargetMode() const
+const QString& ImmichSession::exportTargetMode() const
 {
     return d->exportTargetMode;
 }
 
-void ImmichSession::setUrl(const QString& url)
+void ImmichSession::setUrl(const QString& newUrl)
 {
-    d->url = url;
+    d->url = newUrl;
 }
 
-void ImmichSession::setApiKey(const QString& apiKey)
+void ImmichSession::setApiKey(const QString& newKey)
 {
-    d->apiKey = apiKey;
+    d->apiKey = newKey;
 }
 
 void ImmichSession::setDownloadDir(const QString& dir)

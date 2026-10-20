@@ -47,26 +47,32 @@ public:
     ImmichSession();
     ~ImmichSession();
 
-    QString url()    const;
-    QString apiKey() const;
+    // One session per plugin instance, always used through a
+    // pointer; copying it would duplicate the settings and the
+    // listing cache by accident.
+    ImmichSession(const ImmichSession&)            = delete;
+    ImmichSession& operator=(const ImmichSession&) = delete;
+
+    const QString& url()    const;
+    const QString& apiKey() const;
 
     /** Last folder an album was downloaded to (dialog start). */
-    QString downloadDir() const;
+    const QString& downloadDir() const;
 
     /** What an export does with the previous copy of a photo
      * that was edited in digiKam: "stack" (the new version
      * becomes the primary of a stack over the old one) or
      * "trash" (overwrite: the old copy goes to Immich's trash).
      */
-    QString replaceMode() const;
+    const QString& replaceMode() const;
 
     /** Export destination choice: "library" (no album) or
      * "album" (the album picked in the export window).
      */
-    QString exportTargetMode() const;
+    const QString& exportTargetMode() const;
 
-    void setUrl(const QString& url);
-    void setApiKey(const QString& apiKey);
+    void setUrl(const QString& newUrl);
+    void setApiKey(const QString& newKey);
     void setDownloadDir(const QString& dir);
     void setReplaceMode(const QString& mode);
     void setExportTargetMode(const QString& mode);
