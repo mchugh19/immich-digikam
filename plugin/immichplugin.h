@@ -60,8 +60,8 @@ private Q_SLOTS:
 
 private:
 
-    QPointer<ImmichWindow> m_toolDlgExport;
-    QPointer<ImmichWindow> m_toolDlgImport;
+    class Private;
+    Private* const d;
 };
 
 } // namespace DigikamGenericImmichPlugin

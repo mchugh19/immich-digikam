@@ -27,15 +27,29 @@
 namespace DigikamGenericImmichPlugin
 {
 
+class ImmichPlugin::Private
+{
+public:
+
+    ~Private()
+    {
+        delete toolDlgExport;
+        delete toolDlgImport;
+    }
+
+    QPointer<ImmichWindow> toolDlgExport;
+    QPointer<ImmichWindow> toolDlgImport;
+};
+
 ImmichPlugin::ImmichPlugin(QObject* const parent)
-    : DPluginGeneric(parent)
+    : DPluginGeneric(parent),
+      d(new Private)
 {
 }
 
 ImmichPlugin::~ImmichPlugin()
 {
-    delete m_toolDlgExport;
-    delete m_toolDlgImport;
+    delete d;
 }
 
 QString ImmichPlugin::name() const
@@ -120,23 +134,23 @@ void ImmichPlugin::setup(QObject* const parent)
 
 void ImmichPlugin::slotExport()
 {
-    if (!reactivateToolDialog(m_toolDlgExport))
+    if (!reactivateToolDialog(d->toolDlgExport))
     {
-        delete m_toolDlgExport;
-        m_toolDlgExport = new ImmichWindow(infoIface(sender()), ImmichWindow::Mode::Export, nullptr);
-        m_toolDlgExport->setPlugin(this);
-        m_toolDlgExport->show();
+        delete d->toolDlgExport;
+        d->toolDlgExport = new ImmichWindow(infoIface(sender()), ImmichWindow::Mode::Export, nullptr);
+        d->toolDlgExport->setPlugin(this);
+        d->toolDlgExport->show();
     }
 }
 
 void ImmichPlugin::slotImport()
 {
-    if (!reactivateToolDialog(m_toolDlgImport))
+    if (!reactivateToolDialog(d->toolDlgImport))
     {
-        delete m_toolDlgImport;
-        m_toolDlgImport = new ImmichWindow(infoIface(sender()), ImmichWindow::Mode::Import, nullptr);
-        m_toolDlgImport->setPlugin(this);
-        m_toolDlgImport->show();
+        delete d->toolDlgImport;
+        d->toolDlgImport = new ImmichWindow(infoIface(sender()), ImmichWindow::Mode::Import, nullptr);
+        d->toolDlgImport->setPlugin(this);
+        d->toolDlgImport->show();
     }
 }
 
