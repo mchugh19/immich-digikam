@@ -202,12 +202,11 @@ void ImmichWindow::startPreview(const QString& sourceId)
 
     const QString key = (d->sourceIsTags ? QStringLiteral("tag:")
                                          : QStringLiteral("album:")) + sourceId;
-    const auto cached = d->listingCache.constFind(key);
 
-    if (cached != d->listingCache.constEnd())
+    if (d->session->hasListing(key))
     {
         d->previewSourceId = sourceId;
-        d->previewAssets   = cached.value();
+        d->previewAssets   = d->session->listing(key);
         fillPreview();
         return;
     }

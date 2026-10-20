@@ -29,6 +29,7 @@ using namespace Digikam;
 namespace DigikamGenericImmichPlugin
 {
 
+class ImmichSession;
 class ImmichWindow;
 
 class ImmichPlugin : public DPluginGeneric
@@ -59,6 +60,13 @@ private Q_SLOTS:
     void slotImport();
 
 private:
+
+    /** The session shared by both tool windows, created and
+     * loaded on first use. It lives outside the windows so the
+     * state it holds (settings, the listing cache) survives
+     * them: the windows destroy themselves when closed.
+     */
+    ImmichSession* session();
 
     class Private;
     Private* const d;

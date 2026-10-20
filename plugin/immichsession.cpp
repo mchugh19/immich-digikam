@@ -99,6 +99,8 @@ public:
     QString downloadDir;
     QString replaceMode = QStringLiteral("stack");
     QString exportTargetMode = QStringLiteral("library");
+
+    QHash<QString, QList<ImmichAssetRef>> listingCache;
 };
 
 ImmichSession::ImmichSession()
@@ -159,6 +161,32 @@ void ImmichSession::setReplaceMode(const QString& mode)
 void ImmichSession::setExportTargetMode(const QString& mode)
 {
     d->exportTargetMode = (mode == QStringLiteral("album")) ? mode : QStringLiteral("library");
+}
+
+bool ImmichSession::hasListing(const QString& key) const
+{
+    return d->listingCache.contains(key);
+}
+
+QList<ImmichAssetRef> ImmichSession::listing(const QString& key) const
+{
+    return d->listingCache.value(key);
+}
+
+void ImmichSession::cacheListing(const QString& key,
+                                 const QList<ImmichAssetRef>& assets)
+{
+    d->listingCache.insert(key, assets);
+}
+
+void ImmichSession::invalidateListing(const QString& key)
+{
+    d->listingCache.remove(key);
+}
+
+void ImmichSession::clearListings()
+{
+    d->listingCache.clear();
 }
 
 void ImmichSession::save()

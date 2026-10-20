@@ -17,7 +17,13 @@
 
 // Qt includes
 
+#include <QHash>
+#include <QList>
 #include <QString>
+
+// Local includes
+
+#include "immichitem.h"
 
 namespace DigikamGenericImmichPlugin
 {
@@ -67,6 +73,19 @@ public:
 
     void save();
     void load();
+
+    /** Contents listings by source key ("album:<id>" or
+     * "tag:<id>"), cached for the session. The cache lives
+     * here, not in a tool window, so it survives the windows,
+     * which are created on demand and destroy themselves when
+     * closed.
+     */
+    bool                  hasListing(const QString& key) const;
+    QList<ImmichAssetRef> listing(const QString& key) const;
+    void                  cacheListing(const QString& key,
+                                       const QList<ImmichAssetRef>& assets);
+    void                  invalidateListing(const QString& key);
+    void                  clearListings();
 
 private:
 

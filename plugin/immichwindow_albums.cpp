@@ -285,7 +285,7 @@ void ImmichWindow::slotRefreshAlbums()
 {
     d->session->setUrl(d->urlEdit->text());
     d->session->setApiKey(d->keyEdit->text());
-    d->listingCache.clear();
+    d->session->clearListings();
 
     if (d->mode == Mode::Import && d->sourceIsTags)
     {

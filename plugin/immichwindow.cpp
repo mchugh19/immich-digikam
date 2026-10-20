@@ -70,15 +70,27 @@
 namespace DigikamGenericImmichPlugin
 {
 
-ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* const parent)
+ImmichWindow::ImmichWindow(DInfoInterface* const iface,
+                           ImmichSession* const session, Mode mode,
+                           QWidget* const parent)
     : QDialog(parent),
       d(new Private)
 {
     d->iface   = iface;
     d->mode    = mode;
-    d->session = new ImmichSession;
-    d->session->load();
+    // The session is owned by the plugin and outlives this
+    // window; the state that must survive the window (settings,
+    // the listing cache) lives there, not here.
+    d->session = session;
     d->talker  = new ImmichTalker(d->session, this);
+
+    // This window destroys itself when closed. It must not be
+    // owned by the plugin: deleting widgets from the plugin
+    // destructor runs while the plugin library is being
+    // unloaded at process exit, when Qt's GUI infrastructure
+    // (the shortcut map a mnemonic label unregisters from) is
+    // already gone, which crashes at exit.
+    setAttribute(Qt::WA_DeleteOnClose);
 
     // Sync snapshots live next to digiKam's other app data.
     const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -490,7 +502,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface, Mode mode, QWidget* cons
 
 ImmichWindow::~ImmichWindow()
 {
-    delete d->session;
     delete d;
 }
 

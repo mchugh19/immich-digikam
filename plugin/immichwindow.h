@@ -75,7 +75,8 @@ public:
         Import
     };
 
-    explicit ImmichWindow(DInfoInterface* const iface, Mode mode,
+    explicit ImmichWindow(DInfoInterface* const iface,
+                          ImmichSession* const session, Mode mode,
                           QWidget* const parent = nullptr);
     ~ImmichWindow() override;
 

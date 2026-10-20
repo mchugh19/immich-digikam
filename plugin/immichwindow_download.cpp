@@ -138,7 +138,7 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
     {
         d->listingPurpose = Private::ListingPurpose::None;
         d->previewAssets  = assets;
-        d->listingCache.insert(d->listingKey, assets);
+        d->session->cacheListing(d->listingKey, assets);
         fillPreview();
 
         // The selection moved on while this listing was in flight:
@@ -163,7 +163,7 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
     }
 
     d->listingPurpose = Private::ListingPurpose::None;
-    d->listingCache.insert(d->listingKey, assets);
+    d->session->cacheListing(d->listingKey, assets);
     d->dlListing = false;
     d->dlTotal   = assets.size();
 

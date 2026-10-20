@@ -349,7 +349,7 @@ void ImmichWindow::slotAlbumUpdated(bool changed)
         // The album actually gained assets; its cached contents
         // listing is stale. (When every asset was already in the
         // album, the server changed nothing and the cache stays.)
-        d->listingCache.remove(QStringLiteral("album:") + d->targetAlbumId);
+        d->session->invalidateListing(QStringLiteral("album:") + d->targetAlbumId);
     }
 
     d->albumAssigned = true;

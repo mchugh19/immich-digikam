@@ -174,10 +174,10 @@ public:
     QString               previewSourceId;
     QString               listingKey;
     QList<ImmichAssetRef> previewAssets;
-    // Contents listings by source ("album:<id>" / "tag:<id>"),
-    // for the session; Refresh clears it. Thumbnails are cached
-    // on disk instead (thumbCacheDir), across sessions.
-    QHash<QString, QList<ImmichAssetRef>> listingCache;
+    // Contents listings are cached in the session (see
+    // ImmichSession), so they survive this window. Thumbnails
+    // are cached on disk instead (thumbCacheDir), across
+    // sessions.
     QString               thumbCacheDir;
     QHash<QString, QPixmap> thumbCache;
     QHash<QString, QPixmap> coverCache;
