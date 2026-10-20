@@ -452,7 +452,12 @@ void ImmichTalker::bulkTagAssets(const QString& tagId, const QStringList& assetI
 
 void ImmichTalker::cancel()
 {
-    for (QNetworkReply* const reply : d->ops.keys())
+    // A named copy, not the temporary keys() hands back:
+    // aborting a reply finishes it, which removes it from
+    // d->ops while the loop runs.
+    const QList<QNetworkReply*> replies = d->ops.keys();
+
+    for (QNetworkReply* const reply : replies)
     {
         reply->abort();
     }
@@ -461,14 +466,17 @@ void ImmichTalker::cancel()
 void ImmichTalker::slotFinished(QNetworkReply* reply)
 {
     const Private::Op op = d->ops.take(reply);
-    const QPair<QString, QString> ctx = d->downloadCtx.take(reply);
+    // The download context (asset id, target path). Named
+    // apart from the per-case sync contexts below, which hold
+    // a single id: the two shared the name ctx until now.
+    const QPair<QString, QString> dlCtx = d->downloadCtx.take(reply);
     Q_EMIT signalBusy(false);
 
     if (op == Private::Op::DownloadOriginal || op == Private::Op::DownloadSidecar
         || op == Private::Op::MetaSidecar)
     {
-        const QString& assetId    = ctx.first;
-        const QString& targetPath = ctx.second;
+        const QString& assetId    = dlCtx.first;
+        const QString& targetPath = dlCtx.second;
         const int httpStatus      = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body     = (reply->error() == QNetworkReply::NoError) ? reply->readAll()
                                                                                : QByteArray();
@@ -719,11 +727,11 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
         if (!record.isEmpty())
         {
-            Q_EMIT signalMetaRecord(ctx.first, ctx.second, record);
+            Q_EMIT signalMetaRecord(dlCtx.first, dlCtx.second, record);
         }
         else
         {
-            Q_EMIT signalMetaFinished(ctx.first, false);
+            Q_EMIT signalMetaFinished(dlCtx.first, false);
         }
 
         return;
@@ -741,11 +749,11 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
         if (!record.isEmpty())
         {
-            Q_EMIT signalAssetRecord(ctx.first, ctx.second, record);
+            Q_EMIT signalAssetRecord(dlCtx.first, dlCtx.second, record);
         }
         else
         {
-            Q_EMIT signalDownloadFinished(ctx.first, true);
+            Q_EMIT signalDownloadFinished(dlCtx.first, true);
         }
 
         return;
@@ -766,7 +774,9 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         case Private::Op::ListAlbums:
         {
             QList<ImmichAlbum> albums;
-            for (const QJsonValue& val : doc.array())
+            const QJsonArray items = doc.array();
+
+            for (const QJsonValue& val : items)
             {
                 const QJsonObject obj = val.toObject();
                 ImmichAlbum album;
@@ -799,8 +809,9 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
             // ("duplicate"), so "changed" is exactly "at least
             // one asset was actually added".
             bool changed = false;
+            const QJsonArray items = doc.array();
 
-            for (const QJsonValue& val : doc.array())
+            for (const QJsonValue& val : items)
             {
                 if (val.toObject().value(QStringLiteral("success")).toBool())
                 {
@@ -816,8 +827,9 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         case Private::Op::ListTags:
         {
             QList<ImmichTag> tags;
+            const QJsonArray items = doc.array();
 
-            for (const QJsonValue& val : doc.array())
+            for (const QJsonValue& val : items)
             {
                 const QJsonObject obj = val.toObject();
                 ImmichTag tag;
@@ -912,6 +924,11 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         case Private::Op::DownloadOriginal:
         case Private::Op::DownloadSidecar:
         case Private::Op::None:
+            break;
+
+        default:
+            // Every other op returned earlier (downloads,
+            // records) or in the sync-family switch above.
             break;
     }
 }
