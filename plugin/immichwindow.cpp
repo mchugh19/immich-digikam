@@ -75,7 +75,9 @@ namespace DigikamGenericImmichPlugin
 ImmichWindow::ImmichWindow(DInfoInterface* const iface,
                            ImmichSession* const session, Mode mode,
                            QWidget* const parent)
-    : QDialog(parent),
+    : WSToolDialog(parent, mode == Mode::Export
+                               ? QStringLiteral("ImmichExportWindow")
+                               : QStringLiteral("ImmichImportWindow")),
       d(new Private)
 {
     d->iface   = iface;
@@ -173,8 +175,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     auto* const saveBtn = new QPushButton(i18n("Save settings"));
     d->refreshBtn       = new QPushButton(i18n("Refresh albums"));
     d->newAlbumBtn      = new QPushButton(i18n("New album..."));
-    d->uploadBtn        = new QPushButton(i18n("Upload selection"));
-    d->downloadBtn      = new QPushButton(i18n("Download"));
     d->cancelBtn        = new QPushButton(i18n("Cancel transfer"));
     d->cancelBtn->setEnabled(false);
 
@@ -184,8 +184,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     saveBtn->setIcon(QIcon::fromTheme(QStringLiteral("document-save")));
     d->refreshBtn->setIcon(QIcon::fromTheme(QStringLiteral("view-refresh")));
     d->newAlbumBtn->setIcon(QIcon::fromTheme(QStringLiteral("folder-new")));
-    d->uploadBtn->setIcon(QIcon::fromTheme(QStringLiteral("go-up")));
-    d->downloadBtn->setIcon(QIcon::fromTheme(QStringLiteral("go-down")));
     d->cancelBtn->setIcon(QIcon::fromTheme(QStringLiteral("process-stop")));
     // Albums are tiles, like Immich's own Albums page: a large
     // cover, the name under it in a larger font, then the date
@@ -312,9 +310,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // the filter serves the source list in both.
     d->targetLabel->setVisible(d->mode == Mode::Export);
     d->replaceCombo->setVisible(d->mode == Mode::Export);
-    d->uploadBtn->setVisible(d->mode == Mode::Export);
     d->newAlbumBtn->setVisible(d->mode == Mode::Export);
-    d->downloadBtn->setVisible(d->mode == Mode::Import);
 
     auto* const sourceRow = new QHBoxLayout;
     sourceRow->addWidget(new QLabel(i18n("Import from:")));
@@ -327,7 +323,13 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     previewRow->addWidget(d->previewSort);
     previewRow->addStretch();
 
-    auto* const layout = new QVBoxLayout(this);
+    // The window is a WSToolDialog, like digiKam's other
+    // web-service tools: the content goes into a main widget,
+    // and the framework puts the standard dialog buttons
+    // (Help, the start button, Close) in a button box below
+    // it.
+    auto* const content = new QWidget;
+    auto* const layout  = new QVBoxLayout(content);
     layout->addLayout(form);
 
     // The settings actions sit with the settings they belong to,
@@ -394,7 +396,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     }
 
     layout->addWidget(d->targetLabel);
-    layout->addWidget(d->uploadBtn);
 
     if (d->mode == Mode::Import)
     {
@@ -403,8 +404,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
         downloadDirRow->addWidget(d->downloadDirEdit, 1);
         layout->addLayout(downloadDirRow);
     }
-
-    layout->addWidget(d->downloadBtn);
 
     // The progress bar and Cancel share one always-present
     // row: the bar stays visible (empty when idle) and Cancel
@@ -416,11 +415,25 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     layout->addLayout(progressRow);
     layout->addWidget(d->status);
 
+    setMainWidget(content);
+
+    // The dialog's primary action is the framework's start
+    // button in the button box: Upload for the export tool,
+    // Download for the import tool, with the icons the inline
+    // buttons used to carry.
+    startButton()->setText(d->mode == Mode::Export ? i18n("Upload selection")
+                                                   : i18n("Download"));
+    startButton()->setIcon(QIcon::fromTheme(d->mode == Mode::Export
+                                                ? QStringLiteral("go-up")
+                                                : QStringLiteral("go-down")));
+
+    connect(startButton(), &QPushButton::clicked, this,
+            d->mode == Mode::Export ? &ImmichWindow::slotUploadSelection
+                                    : &ImmichWindow::slotDownloadAlbum);
     connect(saveBtn, &QPushButton::clicked, this, &ImmichWindow::slotSaveSettings);
     connect(d->refreshBtn, &QPushButton::clicked, this, &ImmichWindow::slotRefreshAlbums);
     connect(d->newAlbumBtn, &QPushButton::clicked, this, &ImmichWindow::slotNewAlbum);
     connect(d->talker, &ImmichTalker::signalAlbumCreated, this, &ImmichWindow::slotAlbumCreated);
-    connect(d->uploadBtn, &QPushButton::clicked, this, &ImmichWindow::slotUploadSelection);
     connect(d->albumRadio, &QRadioButton::toggled, this,
             [this](bool on)
             {
@@ -493,7 +506,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
         d->session->setReplaceMode(d->replaceCombo->itemData(index).toString());
         d->session->save();
     });
-    connect(d->downloadBtn, &QPushButton::clicked, this, &ImmichWindow::slotDownloadAlbum);
     connect(d->cancelBtn, &QPushButton::clicked, this, &ImmichWindow::slotCancelTransfer);
     connect(d->talker, &ImmichTalker::signalAlbums, this, &ImmichWindow::slotAlbums);
     connect(d->talker, &ImmichTalker::signalAlbumAssets, this, &ImmichWindow::slotAlbumAssets);
@@ -522,15 +534,9 @@ ImmichWindow::~ImmichWindow()
     delete d;
 }
 
-void ImmichWindow::setPlugin(DPlugin* const /*plugin*/)
-{
-    // Kept for parity with digiKam's other web-service windows,
-    // which receive the plugin instance here.
-}
-
 void ImmichWindow::showEvent(QShowEvent* event)
 {
-    QDialog::showEvent(event);
+    WSToolDialog::showEvent(event);
 
     if (d->mode == Mode::Export)
     {
@@ -612,8 +618,7 @@ void ImmichWindow::setTransferButtonsEnabled(bool enabled)
 {
     d->refreshBtn->setEnabled(enabled);
     d->newAlbumBtn->setEnabled(enabled);
-    d->uploadBtn->setEnabled(enabled);
-    d->downloadBtn->setEnabled(enabled);
+    startButton()->setEnabled(enabled);
 }
 
 void ImmichWindow::slotCancelTransfer()

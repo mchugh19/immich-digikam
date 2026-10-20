@@ -20,7 +20,6 @@
 
 // Qt includes
 
-#include <QDialog>
 #include <QImage>
 #include <QJsonObject>
 #include <QPixmap>
@@ -31,11 +30,11 @@ class QShowEvent;
 // Local includes
 
 #include "immichitem.h"
+#include "wstooldialog.h"
 
 namespace Digikam
 {
 class DInfoInterface;
-class DPlugin;
 class LoadingDescription;
 class ThumbnailLoadThread;
 }
@@ -62,7 +61,7 @@ class ImmichTalker;
  * originals and their sidecars into a chosen folder, skipping
  * files that are already there.
  */
-class ImmichWindow : public QDialog
+class ImmichWindow : public WSToolDialog
 {
     Q_OBJECT
 
@@ -82,8 +81,6 @@ public:
                           ImmichSession* const session, Mode mode,
                           QWidget* const parent = nullptr);
     ~ImmichWindow() override;
-
-    void setPlugin(DPlugin* const plugin);
 
 protected:
 

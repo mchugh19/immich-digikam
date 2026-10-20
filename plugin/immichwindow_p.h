@@ -146,9 +146,7 @@ public:
     QLabel*       status      = nullptr;
     QPushButton*  refreshBtn  = nullptr;
     QPushButton*  newAlbumBtn = nullptr;
-    QPushButton*  uploadBtn   = nullptr;
     KUrlRequester* downloadDirEdit = nullptr;
-    QPushButton*  downloadBtn = nullptr;
     QPushButton*  cancelBtn   = nullptr;
     QProgressBar* progress    = nullptr;
 
