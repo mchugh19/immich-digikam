@@ -311,7 +311,9 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // switch and the contents preview belong to the import tool;
     // the filter serves the source list in both.
     d->targetLabel->setVisible(d->mode == Mode::Export);
-    d->replaceCombo->setVisible(d->mode == Mode::Export);
+    // Hide the whole form row, not just the combo: setVisible on
+    // the field alone leaves its "Edited photos:" label behind.
+    form->setRowVisible(d->replaceCombo, d->mode == Mode::Export);
     d->newAlbumBtn->setVisible(d->mode == Mode::Export);
 
     auto* const sourceRow = new QHBoxLayout;
