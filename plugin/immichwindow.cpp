@@ -296,8 +296,12 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // The download target lives in the window as a KDE URL
     // requester (path field plus folder button), remembered
     // between runs, instead of a modal folder dialog appearing
-    // every time Download is pressed.
-    d->downloadDirEdit = new KUrlRequester(this);
+    // every time Download is pressed. Like every other widget
+    // here it is created parentless and adopted by the layout:
+    // parented to the window but only laid out in Import mode,
+    // it would float unmanaged at the window's top-left corner
+    // in Export mode, over the first form row.
+    d->downloadDirEdit = new KUrlRequester;
     d->downloadDirEdit->setMode(KFile::Directory | KFile::LocalOnly | KFile::ExistingOnly);
     d->downloadDirEdit->setUrl(QUrl::fromLocalFile(
         d->session->downloadDir().isEmpty() ? QDir::homePath()
