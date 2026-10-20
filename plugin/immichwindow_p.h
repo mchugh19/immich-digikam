@@ -200,6 +200,19 @@ public:
     QHash<QString, QList<ThumbJob>> thumbInFlight;
     static constexpr int maxThumbFetches = 4;
 
+    // Thumbnails of LOCAL files (the selection preview in the
+    // export window, the identity check's local frame) come from
+    // digiKam's own thumbnail machinery, which decodes every
+    // format digiKam supports, HEIF included; QImageReader has
+    // no HEIF reader. The thread is the window's child and is
+    // configured to deliver the bare thumbnail (no highlight
+    // frame) and a null pixmap when a load fails, never a
+    // surrogate system icon, so a failure stays distinguishable
+    // from a real thumbnail. Server asset thumbnails keep the
+    // download pipeline above: that data is remote, digiKam has
+    // no file for it.
+    ThumbnailLoadThread* localThumbThread = nullptr;
+
     // Metadata refresh queue for files skipped as already on
     // disk: (asset id, local target path).
     QList<QPair<QString, QString>> metaPending;
@@ -239,6 +252,10 @@ public:
     bool         identityStrict = false;
     bool         identityDimsDiffer = false;
     bool         identityWaitingThumb = false;
+    // The server thumbnail's bytes, held while the matching
+    // local frame is loaded by the thumbnail thread.
+    QByteArray   identityThumbBytes;
+    bool         identityWaitingLocal = false;
     int          identityPass = 1;      // 1 = target-album scope, 2 = library
     bool         identityNameSeen = false;
     int          matchedSync   = 0;

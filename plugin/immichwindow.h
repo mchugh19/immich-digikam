@@ -21,6 +21,7 @@
 // Qt includes
 
 #include <QDialog>
+#include <QImage>
 #include <QJsonObject>
 #include <QPixmap>
 
@@ -35,6 +36,8 @@ namespace Digikam
 {
 class DInfoInterface;
 class DPlugin;
+class LoadingDescription;
+class ThumbnailLoadThread;
 }
 
 using namespace Digikam;
@@ -96,6 +99,7 @@ private Q_SLOTS:
     void slotFilterChanged(const QString& text);
     void slotPreviewSortChanged();
     void slotThumbnail(const QString& assetId, const QByteArray& bytes);
+    void slotLocalThumbnailLoaded(const LoadingDescription& desc, const QPixmap& pix);
     void slotNewAlbum();
     void slotAlbumCreated(const ImmichAlbum& album);
     void slotUploadSelection();
@@ -149,6 +153,7 @@ private:
     void startPreview(const QString& sourceId);
     void fillPreview();
     void fillUploadPreview();
+    void finishIdentityCheck(const QImage& localImage, const QByteArray& bytes);
     void updateExportStatus();
     void nextUpload();
     void finishUpload();

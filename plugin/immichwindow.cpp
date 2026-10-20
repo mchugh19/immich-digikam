@@ -65,6 +65,8 @@
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
+#include "thumbnailloadthread.h"
+#include "thumbnailinfo.h"
 #include "immichxmp.h"
 
 namespace DigikamGenericImmichPlugin
@@ -83,6 +85,17 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // the listing cache) lives there, not here.
     d->session = session;
     d->talker  = new ImmichTalker(d->session, this);
+
+    // Local-file thumbnails are loaded by digiKam's own
+    // thumbnail thread (see Private::localThumbThread). A
+    // dedicated instance, not the shared default thread: the
+    // configuration below is this window's business and must
+    // not leak into digiKam's own views.
+    d->localThumbThread = new ThumbnailLoadThread(this);
+    d->localThumbThread->setHighlightPixmap(false);
+    d->localThumbThread->setSendSurrogatePixmap(false);
+    connect(d->localThumbThread, &ThumbnailLoadThread::signalThumbnailLoaded,
+            this, &ImmichWindow::slotLocalThumbnailLoaded);
 
     // This window destroys itself when closed. It must not be
     // owned by the plugin: deleting widgets from the plugin

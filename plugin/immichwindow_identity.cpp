@@ -37,7 +37,6 @@
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
-#include <QImageReader>
 #include <QPixmap>
 #include <QShowEvent>
 #include <QRadioButton>
@@ -66,6 +65,8 @@
 #include "immichsync.h"
 #include "immichtalker.h"
 #include "immichxmp.h"
+#include "thumbnailinfo.h"
+#include "thumbnailloadthread.h"
 
 namespace DigikamGenericImmichPlugin
 {
@@ -180,21 +181,39 @@ void ImmichWindow::slotIdentityThumb(const QString& /*assetId*/, const QByteArra
         return;
     }
 
-    const QUrl    url  = d->identityUrl;
-    const QString path = url.toLocalFile();
+    const QString path = d->identityUrl.toLocalFile();
 
-    QImage localImage;
-    QImageReader reader(path);
-    reader.setAutoTransform(true);   // match the server thumbnail's orientation
+    // The local frame for the comparison comes from digiKam's
+    // thumbnail machinery, like the selection previews: it
+    // applies the EXIF orientation (matching the server
+    // thumbnail's) and decodes the formats digiKam supports
+    // beyond Qt's image readers. 256 is the largest thumbnail
+    // digiKam serves; the exact size is immaterial here, the
+    // comparison helpers rescale both frames internally. A
+    // cache hit continues at once, a miss continues in
+    // slotLocalThumbnailLoaded when the load lands.
+    d->identityThumbBytes   = bytes;
+    d->identityWaitingLocal = true;
 
-    if (reader.size().isValid())
+    QPixmap pix;
+
+    if (d->localThumbThread->find(ThumbnailIdentifier(path), pix, 256))
     {
-        QSize scaled = reader.size();
-        scaled.scale(320, 320, Qt::KeepAspectRatio);
-        reader.setScaledSize(scaled);
+        d->identityWaitingLocal = false;
+        d->identityThumbBytes.clear();
+        finishIdentityCheck(pix.toImage(), bytes);
+    }
+}
+
+void ImmichWindow::finishIdentityCheck(const QImage& localImage, const QByteArray& bytes)
+{
+    if (d->cancelling || !d->uploading)
+    {
+        return;
     }
 
-    localImage = reader.read();
+    const QUrl    url  = d->identityUrl;
+    const QString path = url.toLocalFile();
 
     QImage remoteImage;
     remoteImage.loadFromData(bytes);

@@ -37,7 +37,6 @@
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
-#include <QImageReader>
 #include <QPixmap>
 #include <QShowEvent>
 #include <QRadioButton>
@@ -66,6 +65,9 @@
 #include "immichsync.h"
 #include "immichtalker.h"
 #include "immichxmp.h"
+#include "loadingdescription.h"
+#include "thumbnailloadthread.h"
+#include "thumbnailinfo.h"
 
 namespace DigikamGenericImmichPlugin
 {
@@ -89,18 +91,69 @@ void ImmichWindow::fillUploadPreview()
         auto* const item = new QListWidgetItem(QFileInfo(path).fileName(), d->previewList);
         item->setSizeHint(QSize(116, 128));
         item->setToolTip(path);
+        item->setData(Qt::UserRole, path);
 
-        QImageReader reader(path);
-        reader.setScaledSize(QSize(96, 96));
-        const QImage image = reader.read();
-        QPixmap pix = image.isNull() ? QPixmap() : QPixmap::fromImage(image);
+        // The selection holds local files, so their thumbnails
+        // come from digiKam's thumbnail machinery: it decodes
+        // every format digiKam supports (HEIF included), where
+        // QImageReader has no reader for some of them. A cache
+        // hit fills the icon at once; a miss starts the load and
+        // slotLocalThumbnailLoaded fills the icon on arrival.
+        QPixmap pix;
 
-        if (pix.width() > 96 || pix.height() > 96)
+        if (d->localThumbThread->find(ThumbnailIdentifier(path), pix, 96)
+            && !pix.isNull())
         {
-            pix = pix.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        }
+            if (pix.width() > 96 || pix.height() > 96)
+            {
+                pix = pix.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            }
 
-        item->setIcon(pix.isNull() ? placeholder : QIcon(pix));
+            item->setIcon(QIcon(pix));
+        }
+        else
+        {
+            item->setIcon(placeholder);
+        }
+    }
+}
+
+void ImmichWindow::slotLocalThumbnailLoaded(const LoadingDescription& desc,
+                                            const QPixmap& pixmap)
+{
+    const QString path = desc.filePath;
+
+    // The identity check may be waiting for this file's frame:
+    // its comparison continues with whatever arrived, a null
+    // pixmap included (undecodable counts as "same" there).
+    if (d->identityWaitingLocal && path == d->identityUrl.toLocalFile())
+    {
+        d->identityWaitingLocal = false;
+        const QByteArray bytes = d->identityThumbBytes;
+        d->identityThumbBytes.clear();
+        finishIdentityCheck(pixmap.toImage(), bytes);
+    }
+
+    if (pixmap.isNull())
+    {
+        return;
+    }
+
+    QPixmap pix = pixmap;
+
+    if (pix.width() > 96 || pix.height() > 96)
+    {
+        pix = pix.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+
+    for (int i = 0 ; i < d->previewList->count() ; ++i)
+    {
+        QListWidgetItem* const item = d->previewList->item(i);
+
+        if (item->data(Qt::UserRole).toString() == path)
+        {
+            item->setIcon(QIcon(pix));
+        }
     }
 }
 
