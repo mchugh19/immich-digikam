@@ -49,6 +49,9 @@ add_library(generic_immich MODULE
     immichsession.cpp
     immichtalker.cpp
     immichwindow.cpp
+    # Listed so AUTOMOC runs on it: SpinnerWidget in this
+    # header carries Q_OBJECT.
+    immichwindow_p.h
     immichwindow_albums.cpp
     immichwindow_thumbs.cpp
     immichwindow_upload.cpp

@@ -56,6 +56,8 @@ namespace DigikamGenericImmichPlugin
 // digiKam headers, so the plugin draws its own.
 class SpinnerWidget : public QWidget
 {
+    Q_OBJECT
+
 public:
 
     explicit SpinnerWidget(QWidget* const parent = nullptr)

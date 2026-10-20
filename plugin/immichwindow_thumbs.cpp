@@ -121,7 +121,7 @@ void ImmichWindow::fillUploadPreview()
 }
 
 void ImmichWindow::slotLocalThumbnailLoaded(const LoadingDescription& desc,
-                                            const QPixmap& pixmap)
+                                            const QPixmap& pix)
 {
     const QString path = desc.filePath;
 
@@ -133,19 +133,19 @@ void ImmichWindow::slotLocalThumbnailLoaded(const LoadingDescription& desc,
         d->identityWaitingLocal = false;
         const QByteArray bytes = d->identityThumbBytes;
         d->identityThumbBytes.clear();
-        finishIdentityCheck(pixmap.toImage(), bytes);
+        finishIdentityCheck(pix.toImage(), bytes);
     }
 
-    if (pixmap.isNull())
+    if (pix.isNull())
     {
         return;
     }
 
-    QPixmap pix = pixmap;
+    QPixmap scaled = pix;
 
-    if (pix.width() > 96 || pix.height() > 96)
+    if (scaled.width() > 96 || scaled.height() > 96)
     {
-        pix = pix.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        scaled = scaled.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
 
     for (int i = 0 ; i < d->previewList->count() ; ++i)
@@ -154,7 +154,7 @@ void ImmichWindow::slotLocalThumbnailLoaded(const LoadingDescription& desc,
 
         if (item->data(Qt::UserRole).toString() == path)
         {
-            item->setIcon(QIcon(pix));
+            item->setIcon(QIcon(scaled));
         }
     }
 }
