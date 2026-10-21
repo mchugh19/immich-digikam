@@ -7,9 +7,9 @@ itself (graphics/digikam on KDE Invent, target location
 ## Window framework and session handling
 
 The windows derive from `WSToolDialog` and use the standard dialog
-button row (Close and the transfer action), matching digiKam's other
-web-service tools. The framework's Help button is dropped while the
-`immich_export` handbook chapter below does not exist. The plugin keeps its own session class, because
+button row (Close, the transfer action, and Help to the
+`immich_export` handbook chapter), matching digiKam's other
+web-service tools. The plugin keeps its own session class, because
 Immich authenticates with a pasted API key and has no OAuth or
 login-dialog flow for the shared framework in
 `core/libs/dplugins/webservices` to run.

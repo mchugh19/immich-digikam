@@ -331,7 +331,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // The window is a WSToolDialog, like digiKam's other
     // web-service tools: the content goes into a main widget,
     // and the framework puts the standard dialog buttons
-    // (the start button, Close) in a button box below
+    // (Help, the start button, Close) in a button box below
     // it.
     auto* const content = new QWidget;
     auto* const layout  = new QVBoxLayout(content);
@@ -565,21 +565,6 @@ ImmichWindow::~ImmichWindow()
 void ImmichWindow::showEvent(QShowEvent* event)
 {
     WSToolDialog::showEvent(event);
-
-    // DPluginDialog has no switch to leave the Help button out
-    // of the button box, and it is only added when the plugin
-    // calls setPlugin(), after this window has been constructed.
-    // The button would point at the immich_export handbook
-    // chapter, which does not exist yet, so it promises help it
-    // cannot give. Drop it here instead, on every show and
-    // before the dialog becomes visible: that ordering survives
-    // the framework's setup, which has no later point at which
-    // it could put the button back.
-    if (QAbstractButton* const helpButton = m_buttons->button(QDialogButtonBox::Help))
-    {
-        m_buttons->removeButton(helpButton);
-        delete helpButton;
-    }
 
     if (d->mode == Mode::Export)
     {
