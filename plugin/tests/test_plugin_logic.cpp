@@ -133,7 +133,7 @@ private Q_SLOTS:
 
     // --- sync planning (immichsync.h) --------------------------
 
-    SyncFields fields(const QStringList& tags, int rating, const QString& desc)
+    static SyncFields fields(const QStringList& tags, int rating, const QString& desc)
     {
         SyncFields f;
         f.tags        = tags;
@@ -274,7 +274,7 @@ private Q_SLOTS:
 
     // --- identity matching (immichsync.h) ----------------------
 
-    IdentityCandidate cand(const QString& id, const QString& name, const QString& time,
+    static IdentityCandidate cand(const QString& id, const QString& name, const QString& time,
                            const QString& created, int w, int h)
     {
         IdentityCandidate c;

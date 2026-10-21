@@ -29,6 +29,13 @@ set(immichplugin_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/immichsession.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/immichtalker.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/immichwindow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/immichwindow_albums.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/immichwindow_thumbs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/immichwindow_upload.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/immichwindow_identity.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/immichwindow_restore.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/immichwindow_sync.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/immichwindow_download.cpp
 )
 
 # The icon is embedded in the binary (the plugin's icon()

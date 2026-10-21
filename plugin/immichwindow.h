@@ -20,7 +20,7 @@
 
 // Qt includes
 
-#include <QDialog>
+#include <QImage>
 #include <QJsonObject>
 #include <QPixmap>
 
@@ -30,11 +30,13 @@ class QShowEvent;
 // Local includes
 
 #include "immichitem.h"
+#include "wstooldialog.h"
 
 namespace Digikam
 {
 class DInfoInterface;
-class DPlugin;
+class LoadingDescription;
+class ThumbnailLoadThread;
 }
 
 using namespace Digikam;
@@ -59,7 +61,7 @@ class ImmichTalker;
  * originals and their sidecars into a chosen folder, skipping
  * files that are already there.
  */
-class ImmichWindow : public QDialog
+class ImmichWindow : public WSToolDialog
 {
     Q_OBJECT
 
@@ -75,11 +77,10 @@ public:
         Import
     };
 
-    explicit ImmichWindow(DInfoInterface* const iface, Mode mode,
+    explicit ImmichWindow(DInfoInterface* const iface,
+                          ImmichSession* const session, Mode mode,
                           QWidget* const parent = nullptr);
     ~ImmichWindow() override;
-
-    void setPlugin(DPlugin* const plugin);
 
 protected:
 
@@ -88,6 +89,7 @@ protected:
 private Q_SLOTS:
 
     void slotSaveSettings();
+    void slotConnect();
     void slotRefreshAlbums();
     void slotAlbums(const QList<ImmichAlbum>& albums);
     void slotTags(const QList<ImmichTag>& tags);
@@ -95,6 +97,7 @@ private Q_SLOTS:
     void slotFilterChanged(const QString& text);
     void slotPreviewSortChanged();
     void slotThumbnail(const QString& assetId, const QByteArray& bytes);
+    void slotLocalThumbnailLoaded(const LoadingDescription& desc, const QPixmap& pix);
     void slotNewAlbum();
     void slotAlbumCreated(const ImmichAlbum& album);
     void slotUploadSelection();
@@ -131,6 +134,8 @@ private Q_SLOTS:
 private:
 
     void setTransferButtonsEnabled(bool enabled);
+    void setConnected(bool connected);
+    void updateConnectionUi();
     void setAlbumLoading(bool loading);
     void applyFilter();
     QListWidgetItem* findAlbumItem(const QString& id) const;
@@ -148,6 +153,7 @@ private:
     void startPreview(const QString& sourceId);
     void fillPreview();
     void fillUploadPreview();
+    void finishIdentityCheck(const QImage& localImage, const QByteArray& bytes);
     void updateExportStatus();
     void nextUpload();
     void finishUpload();

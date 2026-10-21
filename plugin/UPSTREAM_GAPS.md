@@ -4,22 +4,21 @@ Work still required before this plugin can be merged into digiKam
 itself (graphics/digikam on KDE Invent, target location
 `core/dplugins/generic/webservices/immich/`).
 
-## Maintainer decision on the window framework
+## Window framework and session handling
 
-In-tree web-service windows derive from `WSToolDialog` and reuse the
-shared framework in `core/libs/dplugins/webservices`. This plugin's
-window is a plain `DPluginDialog` with its own session class, because
+The windows derive from `WSToolDialog` and use the standard dialog
+button row (Close, the transfer action, and Help to the
+`immich_export` handbook chapter), matching digiKam's other
+web-service tools. The plugin keeps its own session class, because
 Immich authenticates with a pasted API key and has no OAuth or
-login-dialog flow for the framework to run.
+login-dialog flow for the shared framework in
+`core/libs/dplugins/webservices` to run.
 
 Still to do:
 
-- Send the maintainer feeler and get a decision on whether this
-  deviation is acceptable.
-- Raise the same point explicitly in the eventual merge request
-  description.
-- If the maintainers require the framework dialog, rework the window
-  and session handling to use it.
+- Raise the separate session class explicitly in the eventual merge
+  request description, since it is the one remaining deviation from
+  the in-tree web-service pattern.
 
 ## In-tree integration against digiKam master
 

@@ -22,20 +22,43 @@
 
 // Local includes
 
+#include "immichsession.h"
 #include "immichwindow.h"
 
 namespace DigikamGenericImmichPlugin
 {
 
+class ImmichPlugin::Private
+{
+public:
+
+    ~Private()
+    {
+        // Only the session is deleted here: it is a plain
+        // settings object. The windows are not owned and must
+        // not be deleted from the plugin destructor, which runs
+        // while the plugin library is being unloaded at process
+        // exit, when deleting widgets crashes in Qt's GUI
+        // teardown. The windows carry WA_DeleteOnClose and
+        // destroy themselves; the QPointers below simply go
+        // null when one closes.
+        delete session;
+    }
+
+    QPointer<ImmichWindow> toolDlgExport;
+    QPointer<ImmichWindow> toolDlgImport;
+    ImmichSession*         session = nullptr;
+};
+
 ImmichPlugin::ImmichPlugin(QObject* const parent)
-    : DPluginGeneric(parent)
+    : DPluginGeneric(parent),
+      d(new Private)
 {
 }
 
 ImmichPlugin::~ImmichPlugin()
 {
-    delete m_toolDlgExport;
-    delete m_toolDlgImport;
+    delete d;
 }
 
 QString ImmichPlugin::name() const
@@ -118,25 +141,38 @@ void ImmichPlugin::setup(QObject* const parent)
     addAction(importAction);
 }
 
+ImmichSession* ImmichPlugin::session()
+{
+    if (!d->session)
+    {
+        d->session = new ImmichSession;
+        d->session->load();
+    }
+
+    return d->session;
+}
+
 void ImmichPlugin::slotExport()
 {
-    if (!reactivateToolDialog(m_toolDlgExport))
+    if (!reactivateToolDialog(d->toolDlgExport))
     {
-        delete m_toolDlgExport;
-        m_toolDlgExport = new ImmichWindow(infoIface(sender()), ImmichWindow::Mode::Export, nullptr);
-        m_toolDlgExport->setPlugin(this);
-        m_toolDlgExport->show();
+        delete d->toolDlgExport;
+        d->toolDlgExport = new ImmichWindow(infoIface(sender()), session(),
+                                            ImmichWindow::Mode::Export, nullptr);
+        d->toolDlgExport->setPlugin(this);
+        d->toolDlgExport->show();
     }
 }
 
 void ImmichPlugin::slotImport()
 {
-    if (!reactivateToolDialog(m_toolDlgImport))
+    if (!reactivateToolDialog(d->toolDlgImport))
     {
-        delete m_toolDlgImport;
-        m_toolDlgImport = new ImmichWindow(infoIface(sender()), ImmichWindow::Mode::Import, nullptr);
-        m_toolDlgImport->setPlugin(this);
-        m_toolDlgImport->show();
+        delete d->toolDlgImport;
+        d->toolDlgImport = new ImmichWindow(infoIface(sender()), session(),
+                                            ImmichWindow::Mode::Import, nullptr);
+        d->toolDlgImport->setPlugin(this);
+        d->toolDlgImport->show();
     }
 }
 
