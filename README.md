@@ -10,8 +10,61 @@ The plugin (`plugin/`) is a digiKam DPlugin (C++/Qt) modeled on
 digiKam's own web-service tools: it registers "Export to
 Immich..." in the Export menu and "Import from Immich..." in
 the Import menu, each opening a shared window in its own mode.
-See `plugin/README.md` for building, installing, the API key
-permissions and the full feature list.
+See `plugin/README.md` for the API key permissions and the
+full feature list.
+
+## Building
+
+The plugin is an out-of-tree digiKam generic plugin (C++17,
+CMake 3.16 or later). The build declares Qt6 (Widgets and
+Network), the KF6 Config, I18n, Wallet and KIO frameworks, and
+digiKam 9's DigikamCore and DigikamPlugin CMake packages.
+
+On Fedora, those are:
+
+```sh
+sudo dnf install cmake gcc-c++ digikam-devel qt6-qtbase-devel \
+    kf6-kconfig-devel kf6-ki18n-devel kf6-kwallet-devel kf6-kio-devel
+```
+
+Other distributions provide the same Qt6, KF6 and digiKam
+development packages under their own names.
+
+Configure and build from the repository root:
+
+```sh
+cmake -S plugin -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
+```
+
+This produces `build/libgeneric_immich.so`. The unit tests are
+a separate, self-contained CMake project:
+
+```sh
+cmake -S plugin/tests -B build-tests
+cmake --build build-tests
+ctest --test-dir build-tests --output-on-failure
+```
+
+Install the plugin into digiKam's generic plugin directory
+(`/usr/lib64/qt6/plugins/digikam/generic` on Fedora), with its
+icon in the system icon theme:
+
+```sh
+sudo cmake --install build
+```
+
+digiKam picks the plugin up on its next start.
+
+Development note: to run from the build tree without
+installing, `DK_PLUGIN_PATH` must append to digiKam's own
+plugin path, not replace it. The variable replaces the whole
+plugin directory, image loaders included, so naming the build
+directory alone leaves digiKam unable to open any picture:
+
+```sh
+DK_PLUGIN_PATH="$PWD/build;/usr/lib64/qt6/plugins/digikam" digikam
+```
 
 ## How metadata travels
 
