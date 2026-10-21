@@ -134,8 +134,16 @@ void ImmichTalker::listAlbums()
 void ImmichTalker::createAlbum(const QString& name)
 {
     const QJsonObject obj { { QStringLiteral("albumName"), name } };
-    QNetworkReply* const reply = d->net->post(makeRequest(QStringLiteral("/albums")),
-                                              QJsonDocument(obj).toJson());
+
+    // The content type is not decoration: without it Qt posts
+    // the body as application/x-www-form-urlencoded, Immich's
+    // JSON body parser never runs, and the (correct) albumName
+    // field is missing when CreateAlbumDto validates: a 400
+    // against the real server. Every other JSON call in this
+    // class sets the header; this one must too.
+    QNetworkRequest req = makeRequest(QStringLiteral("/albums"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
     d->ops.insert(reply, Private::Op::CreateAlbum);
     Q_EMIT signalBusy(true);
 }
@@ -761,7 +769,39 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
     if (reply->error() != QNetworkReply::NoError)
     {
-        Q_EMIT signalError(reply->errorString());
+        // Qt's errorString() alone ("server replied with status
+        // code 400") discards the explanation Immich sent: the
+        // error body's message field carries it, as a string or
+        // as a list of validation failures. Append it where the
+        // server sent one, so the next rejection explains
+        // itself in the window's status line.
+        QString message = reply->errorString();
+        const QJsonObject body = QJsonDocument::fromJson(reply->readAll()).object();
+        const QJsonValue reason = body.value(QStringLiteral("message"));
+
+        if (reason.isString() && !reason.toString().isEmpty())
+        {
+            message += QStringLiteral(": ") + reason.toString();
+        }
+        else if (reason.isArray())
+        {
+            QStringList reasons;
+
+            for (const QJsonValue& entry : reason.toArray())
+            {
+                if (entry.isString())
+                {
+                    reasons.append(entry.toString());
+                }
+            }
+
+            if (!reasons.isEmpty())
+            {
+                message += QStringLiteral(": ") + reasons.join(QStringLiteral("; "));
+            }
+        }
+
+        Q_EMIT signalError(message);
         reply->deleteLater();
         return;
     }
