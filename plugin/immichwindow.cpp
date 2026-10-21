@@ -386,17 +386,20 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
         d->pickerBox = new QWidget;
         auto* const pickerLayout = new QVBoxLayout(d->pickerBox);
         pickerLayout->setContentsMargins(48, 0, 0, 0);
-        pickerLayout->addWidget(d->filterEdit);
-        pickerLayout->addWidget(d->albumArea, 2);
 
-        // Creating an album acts on the server, through the
-        // connection, so its button lives down here with the
-        // album picker it serves, not in the connection row
-        // above the rule.
-        auto* const newAlbumRow = new QHBoxLayout;
-        newAlbumRow->addWidget(d->newAlbumBtn);
-        newAlbumRow->addStretch();
-        pickerLayout->addLayout(newAlbumRow);
+        // The picker's header row carries the controls of the
+        // collection it heads: the filter, and at its right end
+        // the create action for that collection. Creating an
+        // album acts on the server, through the connection, but
+        // the button belongs to the album picker it serves, not
+        // the connection row above the rule; and in a row of its
+        // own below the browser, a short window squeezed it
+        // over the tiles.
+        auto* const filterRow = new QHBoxLayout;
+        filterRow->addWidget(d->filterEdit, 1);
+        filterRow->addWidget(d->newAlbumBtn);
+        pickerLayout->addLayout(filterRow);
+        pickerLayout->addWidget(d->albumArea, 2);
         layout->addWidget(d->pickerBox, 2);
         layout->addWidget(d->tagGrid, 2);
     }
