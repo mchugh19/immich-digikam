@@ -28,7 +28,7 @@
 namespace DigikamGenericImmichPlugin
 {
 
-class ImmichPlugin::Private
+class Q_DECL_HIDDEN ImmichPlugin::Private
 {
 public:
 

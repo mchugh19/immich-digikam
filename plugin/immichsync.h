@@ -25,8 +25,9 @@ namespace DigikamGenericImmichPlugin
 // caller; Immich's -1 "rejected" is a pick-label concept digiKam
 // keeps separately, so the sync never produces it), tags are the
 // flat value strings both sides share.
-struct SyncFields
+class SyncFields
 {
+public:
     QStringList tags;
     int         rating      = 0;
     QString     description;
@@ -40,8 +41,9 @@ struct SyncFields
 // exifInfo (with the top-level rating fallback older records
 // need), plus the record's updatedAt and checksum for the
 // snapshot bookkeeping.
-struct ServerFields
+class ServerFields
 {
+public:
     SyncFields fields;
     QString    updatedAt;
     QString    checksum;
@@ -113,8 +115,9 @@ enum class GateAction
                  // tags still merge, scalars stay server-side
 };
 
-struct GateResult
+class GateResult
 {
+public:
     GateAction action   = GateAction::Push;
     bool       conflict = false;
 };
@@ -165,8 +168,9 @@ inline GateResult gateSync(bool haveSnapshot,
 // Tag changes are add-only by design: a tag the server has and
 // digiKam does not is never removed (it may have been set in
 // Immich itself, and an export is not a deletion channel).
-struct SyncPlan
+class SyncPlan
 {
+public:
     QStringList tagsToAdd;
     bool        setRating     = false;
     int         rating        = 0;   // 0 = clear to unrated
@@ -251,8 +255,9 @@ inline QString syncFieldHash(const SyncFields& f)
 // Per-asset sync snapshot: what the server held and what
 // digiKam held the last time this asset was synced (in either
 // direction). Keyed by asset id in a JSON file the window owns.
-struct SyncSnapshot
+class SyncSnapshot
 {
+public:
     QString checksum;
     QString serverUpdatedAt;
     QString serverHash;
@@ -294,8 +299,9 @@ struct SyncSnapshot
 // no reliable time evidence the file uploads as new instead, so
 // a stranger's photo is never overwritten on a name collision.
 
-struct IdentityCandidate
+class IdentityCandidate
 {
+public:
     QString id;
     QString name;
     QString localDateTime;   // server wall-clock capture time
@@ -305,8 +311,9 @@ struct IdentityCandidate
     int     height = 0;
 };
 
-struct IdentityMatch
+class IdentityMatch
 {
+public:
     QString assetId;
     QString stackId;           // stackId of the chosen candidate
     int     candidates  = 0;   // name+dimension matches found

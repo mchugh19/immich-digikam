@@ -16,7 +16,6 @@
 
 // Self includes
 
-#include "immichwindow.h"
 #include "immichwindow_p.h"
 
 // Qt includes

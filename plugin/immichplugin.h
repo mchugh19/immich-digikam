@@ -15,8 +15,7 @@
  * ============================================================ */
 
 
-#ifndef DIGIKAM_IMMICH_PLUGIN_H
-#define DIGIKAM_IMMICH_PLUGIN_H
+#pragma once
 
 // Local includes
 
@@ -74,4 +73,3 @@ private:
 
 } // namespace DigikamGenericImmichPlugin
 
-#endif // DIGIKAM_IMMICH_PLUGIN_H
