@@ -177,7 +177,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     auto* const editForm = new QFormLayout;
     editForm->addRow(i18n("Edited photos:"), d->replaceCombo);
 
-    auto* const saveBtn = new QPushButton(i18n("Save settings"));
     d->connectBtn       = new QPushButton(i18n("Connect"));
     d->refreshBtn       = new QPushButton(i18n("Refresh albums"));
     d->newAlbumBtn      = new QPushButton(i18n("New album..."));
@@ -188,7 +187,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // for the same actions, so the window sits naturally in the
     // host's icon theme.
     d->connectBtn->setIcon(QIcon::fromTheme(QStringLiteral("network-connect")));
-    saveBtn->setIcon(QIcon::fromTheme(QStringLiteral("document-save")));
     d->refreshBtn->setIcon(QIcon::fromTheme(QStringLiteral("view-refresh")));
     d->newAlbumBtn->setIcon(QIcon::fromTheme(QStringLiteral("folder-new")));
     d->cancelBtn->setIcon(QIcon::fromTheme(QStringLiteral("process-stop")));
@@ -345,7 +343,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // at natural width, instead of stretching across the dialog.
     auto* const settingsBtnRow = new QHBoxLayout;
     settingsBtnRow->addWidget(d->connectBtn);
-    settingsBtnRow->addWidget(saveBtn);
     settingsBtnRow->addWidget(d->refreshBtn);
     settingsBtnRow->addWidget(d->newAlbumBtn);
     settingsBtnRow->addStretch();
@@ -452,7 +449,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
             d->mode == Mode::Export ? &ImmichWindow::slotUploadSelection
                                     : &ImmichWindow::slotDownloadAlbum);
     connect(d->connectBtn, &QPushButton::clicked, this, &ImmichWindow::slotConnect);
-    connect(saveBtn, &QPushButton::clicked, this, &ImmichWindow::slotSaveSettings);
     connect(d->refreshBtn, &QPushButton::clicked, this, &ImmichWindow::slotRefreshAlbums);
     connect(d->newAlbumBtn, &QPushButton::clicked, this, &ImmichWindow::slotNewAlbum);
     connect(d->talker, &ImmichTalker::signalAlbumCreated, this, &ImmichWindow::slotAlbumCreated);
@@ -675,8 +671,7 @@ void ImmichWindow::updateConnectionUi()
     // Until the window is connected, everything below the
     // connection settings reads as waiting: disabled rather
     // than a blank form to guess at. The connection controls
-    // themselves (URL, API key, Connect, Save settings) always
-    // stay usable.
+    // themselves (URL, API key, Connect) always stay usable.
     const bool on   = d->connected;
     const bool idle = !d->uploading && !d->downloading;
 
