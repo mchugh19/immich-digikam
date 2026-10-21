@@ -14,8 +14,7 @@
  *
  * ============================================================ */
 
-#ifndef DIGIKAM_IMMICH_WINDOW_P_H
-#define DIGIKAM_IMMICH_WINDOW_P_H
+#pragma once
 
 // Qt includes
 
@@ -342,4 +341,3 @@ public:
 
 } // namespace DigikamGenericImmichPlugin
 
-#endif // DIGIKAM_IMMICH_WINDOW_P_H

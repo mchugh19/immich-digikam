@@ -12,8 +12,7 @@
  * ============================================================ */
 
 
-#ifndef DIGIKAM_IMMICH_SESSION_H
-#define DIGIKAM_IMMICH_SESSION_H
+#pragma once
 
 // Qt includes
 
@@ -101,4 +100,3 @@ private:
 
 } // namespace DigikamGenericImmichPlugin
 
-#endif // DIGIKAM_IMMICH_SESSION_H

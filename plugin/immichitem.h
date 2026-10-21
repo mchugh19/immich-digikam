@@ -12,8 +12,7 @@
  * ============================================================ */
 
 
-#ifndef DIGIKAM_IMMICH_ITEM_H
-#define DIGIKAM_IMMICH_ITEM_H
+#pragma once
 
 // Qt includes
 
@@ -53,4 +52,3 @@ struct ImmichAssetRef
 
 } // namespace DigikamGenericImmichPlugin
 
-#endif // DIGIKAM_IMMICH_ITEM_H

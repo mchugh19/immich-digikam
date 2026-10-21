@@ -12,8 +12,7 @@
  * ============================================================ */
 
 
-#ifndef DIGIKAM_IMMICH_TALKER_H
-#define DIGIKAM_IMMICH_TALKER_H
+#pragma once
 
 // Qt includes
 
@@ -233,4 +232,3 @@ private:
 
 } // namespace DigikamGenericImmichPlugin
 
-#endif // DIGIKAM_IMMICH_TALKER_H
