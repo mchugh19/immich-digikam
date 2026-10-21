@@ -308,7 +308,15 @@ void ImmichWindow::slotSourceChanged()
     }
 
     d->sourceIsTags = tags;
-    d->newAlbumBtn->setEnabled(!tags && d->connected);
+
+    // With Tags as the source there is no new album to create,
+    // so in the export tool the button is hidden rather than
+    // shown disabled. (The import tool never shows it.)
+    if (d->mode == Mode::Export)
+    {
+        d->newAlbumBtn->setVisible(!tags && d->albumRadio->isChecked());
+    }
+
     d->albumArea->setVisible(!tags);
     d->tagGrid->setVisible(tags);
     d->albumGrid->clear();

@@ -344,7 +344,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     auto* const settingsBtnRow = new QHBoxLayout;
     settingsBtnRow->addWidget(d->connectBtn);
     settingsBtnRow->addWidget(d->refreshBtn);
-    settingsBtnRow->addWidget(d->newAlbumBtn);
     settingsBtnRow->addStretch();
     layout->addLayout(settingsBtnRow);
 
@@ -389,6 +388,15 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
         pickerLayout->setContentsMargins(48, 0, 0, 0);
         pickerLayout->addWidget(d->filterEdit);
         pickerLayout->addWidget(d->albumArea, 2);
+
+        // Creating an album acts on the server, through the
+        // connection, so its button lives down here with the
+        // album picker it serves, not in the connection row
+        // above the rule.
+        auto* const newAlbumRow = new QHBoxLayout;
+        newAlbumRow->addWidget(d->newAlbumBtn);
+        newAlbumRow->addStretch();
+        pickerLayout->addLayout(newAlbumRow);
         layout->addWidget(d->pickerBox, 2);
         layout->addWidget(d->tagGrid, 2);
     }
@@ -691,7 +699,7 @@ void ImmichWindow::updateConnectionUi()
     const bool idle = !d->uploading && !d->downloading;
 
     d->refreshBtn->setEnabled(on && idle);
-    d->newAlbumBtn->setEnabled(on && !d->sourceIsTags);
+    d->newAlbumBtn->setEnabled(on);
     d->replaceCombo->setEnabled(on);
     d->filterEdit->setEnabled(on);
     d->albumArea->setEnabled(on);
@@ -715,7 +723,7 @@ void ImmichWindow::applyTargetMode()
 
     const bool album = d->albumRadio->isChecked();
     d->pickerBox->setVisible(album);
-    d->newAlbumBtn->setVisible(album);
+    d->newAlbumBtn->setVisible(album && !d->sourceIsTags);
     updateTargetLabel();
     updateExportStatus();
 }
