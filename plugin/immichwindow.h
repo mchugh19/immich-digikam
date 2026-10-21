@@ -125,7 +125,6 @@ private Q_SLOTS:
                         const QJsonObject& record);
     void slotCancelTransfer();
     void slotError(const QString& msg);
-    void slotBusy(bool val);
     void slotSyncRecord(const QString& assetId, const QJsonObject& record, int httpStatus);
     void slotAssetPatched(const QString& assetId, int httpStatus);
     void slotTagCreated(const QString& name, const QString& id, int httpStatus);
