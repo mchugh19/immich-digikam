@@ -186,8 +186,9 @@ public:
     // the album covers on the album tiles, a few fetches at a
     // time: one at a time made a 150-album view feel slow even
     // though each image is small.
-    struct ThumbJob
+    class ThumbJob
     {
+    public:
         bool    cover   = false;
         QString key;        // album id for covers, asset id for previews
         QString assetId;    // the asset whose thumbnail is fetched
@@ -241,8 +242,9 @@ public:
     // server's asset record and only the differences are written
     // (PUT /assets, tags API). Jobs carry the digiKam fields
     // captured when the check ran.
-    struct SyncJob
+    class SyncJob
     {
+    public:
         QString    assetId;
         QString    localPath;
         SyncFields dk;
@@ -269,8 +271,9 @@ public:
     int          trashFallbackCount = 0;
     QHash<QString, QString> replaceOldByPath;
     QHash<QString, QString> replaceStackByPath;
-    struct ReplaceCtx
+    class ReplaceCtx
     {
+    public:
         QString oldId;
         QString newId;
         QString localPath;
@@ -308,8 +311,9 @@ public:
     int          syncPatchInFlight = 0;
     int          syncProcessed = 0;
     static constexpr int maxSyncFetches = 6;
-    struct SyncAssetCtx
+    class SyncAssetCtx
     {
+    public:
         SyncPlan     plan;
         ServerFields server;
         bool         failed = false;

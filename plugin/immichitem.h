@@ -25,8 +25,9 @@ namespace DigikamGenericImmichPlugin
  * endDate are the capture dates of the album's oldest and newest
  * assets (the date range Immich's own album view shows).
  */
-struct ImmichAlbum
+class ImmichAlbum
 {
+public:
     QString id;
     QString name;
     int     assetCount = 0;
@@ -36,15 +37,17 @@ struct ImmichAlbum
 };
 
 /** One Immich tag, as returned by GET /tags. */
-struct ImmichTag
+class ImmichTag
 {
+public:
     QString id;
     QString name;
 };
 
 /** One asset of an album, as listed by POST /search/metadata. */
-struct ImmichAssetRef
+class ImmichAssetRef
 {
+public:
     QString id;
     QString fileName;
     QString fileCreatedAt;

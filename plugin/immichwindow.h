@@ -43,7 +43,7 @@ using namespace Digikam;
 namespace DigikamGenericImmichPlugin
 {
 
-struct SyncFields;
+class SyncFields;
 
 class ImmichSession;
 class ImmichTalker;
