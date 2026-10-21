@@ -53,7 +53,7 @@ namespace DigikamGenericImmichPlugin
 // equivalent widget (WorkingWidget), but it is internal to
 // libdigikamcore: its header is not among the installed
 // digiKam headers, so the plugin draws its own.
-class SpinnerWidget : public QWidget
+class Q_DECL_HIDDEN SpinnerWidget : public QWidget
 {
     Q_OBJECT
 
@@ -118,7 +118,7 @@ private:
     int    m_step = 0;
 };
 
-class ImmichWindow::Private
+class Q_DECL_HIDDEN ImmichWindow::Private
 {
 public:
 

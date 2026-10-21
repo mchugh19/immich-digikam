@@ -102,7 +102,7 @@ bool writeWalletApiKey(const QString& apiKey)
 
 } // namespace
 
-class ImmichSession::Private
+class Q_DECL_HIDDEN ImmichSession::Private
 {
 public:
 

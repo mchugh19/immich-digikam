@@ -39,7 +39,7 @@
 namespace DigikamGenericImmichPlugin
 {
 
-class ImmichTalker::Private
+class Q_DECL_HIDDEN ImmichTalker::Private
 {
 public:
 
