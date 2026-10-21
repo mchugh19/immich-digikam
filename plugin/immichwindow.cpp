@@ -178,7 +178,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     editForm->addRow(i18n("Edited photos:"), d->replaceCombo);
 
     d->connectBtn       = new QPushButton(i18n("Connect"));
-    d->refreshBtn       = new QPushButton(i18n("Refresh albums"));
     d->newAlbumBtn      = new QPushButton(i18n("New album..."));
     d->cancelBtn        = new QPushButton(i18n("Cancel transfer"));
     d->cancelBtn->setEnabled(false);
@@ -187,7 +186,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // for the same actions, so the window sits naturally in the
     // host's icon theme.
     d->connectBtn->setIcon(QIcon::fromTheme(QStringLiteral("network-connect")));
-    d->refreshBtn->setIcon(QIcon::fromTheme(QStringLiteral("view-refresh")));
     d->newAlbumBtn->setIcon(QIcon::fromTheme(QStringLiteral("folder-new")));
     d->cancelBtn->setIcon(QIcon::fromTheme(QStringLiteral("process-stop")));
     // Albums are tiles, like Immich's own Albums page: a large
@@ -339,11 +337,10 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     auto* const layout  = new QVBoxLayout(content);
     layout->addLayout(form);
 
-    // The settings actions sit with the settings they belong to,
+    // The settings action sits with the settings it belongs to,
     // at natural width, instead of stretching across the dialog.
     auto* const settingsBtnRow = new QHBoxLayout;
     settingsBtnRow->addWidget(d->connectBtn);
-    settingsBtnRow->addWidget(d->refreshBtn);
     settingsBtnRow->addStretch();
     layout->addLayout(settingsBtnRow);
 
@@ -460,7 +457,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
             d->mode == Mode::Export ? &ImmichWindow::slotUploadSelection
                                     : &ImmichWindow::slotDownloadAlbum);
     connect(d->connectBtn, &QPushButton::clicked, this, &ImmichWindow::slotConnect);
-    connect(d->refreshBtn, &QPushButton::clicked, this, &ImmichWindow::slotRefreshAlbums);
     connect(d->newAlbumBtn, &QPushButton::clicked, this, &ImmichWindow::slotNewAlbum);
     connect(d->talker, &ImmichTalker::signalAlbumCreated, this, &ImmichWindow::slotAlbumCreated);
     connect(d->albumRadio, &QRadioButton::toggled, this,
@@ -555,7 +551,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     connect(d->talker, &ImmichTalker::signalStackCreated, this, &ImmichWindow::slotStackCreated);
     connect(d->talker, &ImmichTalker::signalStackFetched, this, &ImmichWindow::slotStackFetched);
     connect(d->talker, &ImmichTalker::signalError, this, &ImmichWindow::slotError);
-    connect(d->talker, &ImmichTalker::signalBusy, this, &ImmichWindow::slotBusy);
 
     // Nothing is connected yet: the sections below the
     // connection settings start out disabled (waiting).
@@ -701,7 +696,6 @@ void ImmichWindow::updateConnectionUi()
     const bool on   = d->connected;
     const bool idle = !d->uploading && !d->downloading;
 
-    d->refreshBtn->setEnabled(on && idle);
     d->newAlbumBtn->setEnabled(on);
     d->replaceCombo->setEnabled(on);
     d->filterEdit->setEnabled(on);
@@ -746,7 +740,6 @@ void ImmichWindow::updateTargetLabel()
 
 void ImmichWindow::setTransferButtonsEnabled(bool enabled)
 {
-    d->refreshBtn->setEnabled(enabled);
     d->newAlbumBtn->setEnabled(enabled);
     d->connectBtn->setEnabled(enabled);
     startButton()->setEnabled(enabled && d->connected);
@@ -853,14 +846,6 @@ void ImmichWindow::slotError(const QString& msg)
     }
 
     d->status->setText(msg);
-}
-
-void ImmichWindow::slotBusy(bool val)
-{
-    if (!d->uploading && !d->downloading)
-    {
-        d->refreshBtn->setEnabled(!val && d->connected);
-    }
 }
 
 } // namespace DigikamGenericImmichPlugin

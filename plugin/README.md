@@ -37,8 +37,8 @@ digiKam's own web-service plugins (Piwigo in particular).
 - Transfers run with a progress bar and end with a one-line
   summary of outcome counts.
 - Thumbnails are cached on disk (about 200 MB, oldest pruned
-  first); album contents are cached for the session, with
-  Refresh as the invalidation.
+  first); album contents are cached for the session, and
+  clicking Connect again reloads them.
 
 ## Re-exporting: what to expect
 
@@ -143,7 +143,7 @@ DK_PLUGIN_PATH="$PWD/build;/usr/lib64/qt6/plugins/digikam" digikam
 Then: Plugins settings should list Immich, the Export menu gains
 "Export to Immich..." and the Import menu gains "Import from
 Immich...". Each opens the shared window in its own mode, and
-Refresh albums should list the server's albums.
+Connect should list the server's albums.
 
 ## Unit tests
 
