@@ -8,10 +8,10 @@
 // say) belongs to the class these tests pin down, and they run
 // without a server or a network.
 //
-// The stub records each request (method, path, JSON body) and
-// answers from canned routes, so a test reads: given this API
-// call, the talker must send exactly this, and given this
-// reply, it must emit exactly that.
+// The stub records each request (method, path, content type,
+// JSON body) and answers from canned routes, so a test reads:
+// given this API call, the talker must send exactly this, and
+// given this reply, it must emit exactly that.
 
 #include <QtTest>
 #include <QJsonArray>
@@ -36,6 +36,7 @@ public:
     {
         QString    method;
         QString    path;
+        QString    contentType;
         QJsonObject body;
     };
 
@@ -61,11 +62,18 @@ public:
                 const QString head = QString::fromLatin1(buf.left(headerEnd));
                 int contentLength = 0;
 
+                QString contentType;
+
                 for (const QString& line : head.split(QStringLiteral("\r\n")))
                 {
                     if (line.startsWith(QStringLiteral("Content-Length:"), Qt::CaseInsensitive))
                     {
                         contentLength = line.mid(15).trimmed().toInt();
+                    }
+
+                    if (line.startsWith(QStringLiteral("Content-Type:"), Qt::CaseInsensitive))
+                    {
+                        contentType = line.mid(13).trimmed();
                     }
                 }
 
@@ -78,9 +86,10 @@ public:
                 const QStringList firstLine = head.split(QStringLiteral("\r\n"))
                                                   .value(0).split(QLatin1Char(' '));
                 Request req;
-                req.method = firstLine.value(0);
-                req.path   = firstLine.value(1);
-                req.body   = QJsonDocument::fromJson(body).object();
+                req.method      = firstLine.value(0);
+                req.path        = firstLine.value(1);
+                req.contentType = contentType;
+                req.body        = QJsonDocument::fromJson(body).object();
                 requests.append(req);
 
                 const QPair<int, QByteArray> route = routes.value(
@@ -158,6 +167,54 @@ private Q_SLOTS:
         QVERIFY(!req.body.contains(QStringLiteral("tagId")));
         QCOMPARE(req.body.value(QStringLiteral("tagIds")).toArray(), expectedTags);
         QCOMPARE(req.body.value(QStringLiteral("assetIds")).toArray(), expectedAssets);
+    }
+
+    void createAlbumShapeAndParse()
+    {
+        m_stub->routes.insert(QStringLiteral("POST /api/albums"),
+                              qMakePair(201, QByteArray("{\"id\":\"alb1\",\"albumName\":\"Holidays\","
+                                                        "\"assetCount\":0}")));
+        ImmichAlbum created;
+        bool gotCreated = false;
+        connect(m_talker, &ImmichTalker::signalAlbumCreated, this,
+                [&created, &gotCreated](const ImmichAlbum& album) {
+                    created    = album;
+                    gotCreated = true;
+                });
+        m_talker->createAlbum(QStringLiteral("Holidays"));
+        QTRY_VERIFY(gotCreated);
+        QCOMPARE(created.id, QStringLiteral("alb1"));
+        QCOMPARE(created.name, QStringLiteral("Holidays"));
+
+        QCOMPARE(m_stub->requests.size(), 1);
+        const StubServer::Request req = m_stub->requests.at(0);
+        QCOMPARE(req.method, QStringLiteral("POST"));
+        QCOMPARE(req.path, QStringLiteral("/api/albums"));
+        // CreateAlbumDto (3.3.3): albumName is the one required
+        // field, and the only one this call sends.
+        QCOMPARE(req.body.size(), 1);
+        QCOMPARE(req.body.value(QStringLiteral("albumName")).toString(),
+                 QStringLiteral("Holidays"));
+        // The body must also arrive AS JSON. Without the content
+        // type Qt posts form-urlencoded, the server's JSON parser
+        // never runs, albumName is missing at validation, and
+        // the real server answers 400. This is the assertion the
+        // original code failed.
+        QVERIFY(req.contentType.startsWith(QStringLiteral("application/json")));
+    }
+
+    void errorSurfacesServerMessage()
+    {
+        m_stub->routes.insert(QStringLiteral("POST /api/albums"),
+                              qMakePair(400, QByteArray("{\"message\":\"albumName must be a string\","
+                                                        "\"error\":\"Bad Request\",\"statusCode\":400}")));
+        QSignalSpy spy(m_talker, &ImmichTalker::signalError);
+        m_talker->createAlbum(QStringLiteral("Holidays"));
+        QVERIFY(spy.wait(5000));
+        // Qt's own text only reports the status code; the reason
+        // the server sent in the body's message field must reach
+        // the error the window displays.
+        QVERIFY(spy.at(0).at(0).toString().contains(QStringLiteral("albumName must be a string")));
     }
 
     void deleteAssetsBodyShape()

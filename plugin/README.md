@@ -109,7 +109,8 @@ Tested against Immich 3.3.3. The API key needs:
 In a Fedora toolbox (43 or 44) matching your digiKam:
 
 ```sh
-sudo dnf install digikam-devel kf6-kconfig-devel kf6-ki18n-devel
+sudo dnf install cmake gcc-c++ digikam-devel qt6-qtbase-devel \
+    kf6-kconfig-devel kf6-ki18n-devel kf6-kwallet-devel kf6-kio-devel
 cmake -S plugin -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 ```

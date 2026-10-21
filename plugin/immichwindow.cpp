@@ -177,7 +177,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     auto* const editForm = new QFormLayout;
     editForm->addRow(i18n("Edited photos:"), d->replaceCombo);
 
-    auto* const saveBtn = new QPushButton(i18n("Save settings"));
     d->connectBtn       = new QPushButton(i18n("Connect"));
     d->refreshBtn       = new QPushButton(i18n("Refresh albums"));
     d->newAlbumBtn      = new QPushButton(i18n("New album..."));
@@ -188,7 +187,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // for the same actions, so the window sits naturally in the
     // host's icon theme.
     d->connectBtn->setIcon(QIcon::fromTheme(QStringLiteral("network-connect")));
-    saveBtn->setIcon(QIcon::fromTheme(QStringLiteral("document-save")));
     d->refreshBtn->setIcon(QIcon::fromTheme(QStringLiteral("view-refresh")));
     d->newAlbumBtn->setIcon(QIcon::fromTheme(QStringLiteral("folder-new")));
     d->cancelBtn->setIcon(QIcon::fromTheme(QStringLiteral("process-stop")));
@@ -335,7 +333,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // The window is a WSToolDialog, like digiKam's other
     // web-service tools: the content goes into a main widget,
     // and the framework puts the standard dialog buttons
-    // (Help, the start button, Close) in a button box below
+    // (the start button, Close) in a button box below
     // it.
     auto* const content = new QWidget;
     auto* const layout  = new QVBoxLayout(content);
@@ -345,9 +343,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // at natural width, instead of stretching across the dialog.
     auto* const settingsBtnRow = new QHBoxLayout;
     settingsBtnRow->addWidget(d->connectBtn);
-    settingsBtnRow->addWidget(saveBtn);
     settingsBtnRow->addWidget(d->refreshBtn);
-    settingsBtnRow->addWidget(d->newAlbumBtn);
     settingsBtnRow->addStretch();
     layout->addLayout(settingsBtnRow);
 
@@ -392,6 +388,15 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
         pickerLayout->setContentsMargins(48, 0, 0, 0);
         pickerLayout->addWidget(d->filterEdit);
         pickerLayout->addWidget(d->albumArea, 2);
+
+        // Creating an album acts on the server, through the
+        // connection, so its button lives down here with the
+        // album picker it serves, not in the connection row
+        // above the rule.
+        auto* const newAlbumRow = new QHBoxLayout;
+        newAlbumRow->addWidget(d->newAlbumBtn);
+        newAlbumRow->addStretch();
+        pickerLayout->addLayout(newAlbumRow);
         layout->addWidget(d->pickerBox, 2);
         layout->addWidget(d->tagGrid, 2);
     }
@@ -452,7 +457,6 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
             d->mode == Mode::Export ? &ImmichWindow::slotUploadSelection
                                     : &ImmichWindow::slotDownloadAlbum);
     connect(d->connectBtn, &QPushButton::clicked, this, &ImmichWindow::slotConnect);
-    connect(saveBtn, &QPushButton::clicked, this, &ImmichWindow::slotSaveSettings);
     connect(d->refreshBtn, &QPushButton::clicked, this, &ImmichWindow::slotRefreshAlbums);
     connect(d->newAlbumBtn, &QPushButton::clicked, this, &ImmichWindow::slotNewAlbum);
     connect(d->talker, &ImmichTalker::signalAlbumCreated, this, &ImmichWindow::slotAlbumCreated);
@@ -563,6 +567,21 @@ ImmichWindow::~ImmichWindow()
 void ImmichWindow::showEvent(QShowEvent* event)
 {
     WSToolDialog::showEvent(event);
+
+    // DPluginDialog has no switch to leave the Help button out
+    // of the button box, and it is only added when the plugin
+    // calls setPlugin(), after this window has been constructed.
+    // The button would point at the immich_export handbook
+    // chapter, which does not exist yet, so it promises help it
+    // cannot give. Drop it here instead, on every show and
+    // before the dialog becomes visible: that ordering survives
+    // the framework's setup, which has no later point at which
+    // it could put the button back.
+    if (QAbstractButton* const helpButton = m_buttons->button(QDialogButtonBox::Help))
+    {
+        m_buttons->removeButton(helpButton);
+        delete helpButton;
+    }
 
     if (d->mode == Mode::Export)
     {
@@ -675,13 +694,12 @@ void ImmichWindow::updateConnectionUi()
     // Until the window is connected, everything below the
     // connection settings reads as waiting: disabled rather
     // than a blank form to guess at. The connection controls
-    // themselves (URL, API key, Connect, Save settings) always
-    // stay usable.
+    // themselves (URL, API key, Connect) always stay usable.
     const bool on   = d->connected;
     const bool idle = !d->uploading && !d->downloading;
 
     d->refreshBtn->setEnabled(on && idle);
-    d->newAlbumBtn->setEnabled(on && !d->sourceIsTags);
+    d->newAlbumBtn->setEnabled(on);
     d->replaceCombo->setEnabled(on);
     d->filterEdit->setEnabled(on);
     d->albumArea->setEnabled(on);
@@ -705,7 +723,7 @@ void ImmichWindow::applyTargetMode()
 
     const bool album = d->albumRadio->isChecked();
     d->pickerBox->setVisible(album);
-    d->newAlbumBtn->setVisible(album);
+    d->newAlbumBtn->setVisible(album && !d->sourceIsTags);
     updateTargetLabel();
     updateExportStatus();
 }
