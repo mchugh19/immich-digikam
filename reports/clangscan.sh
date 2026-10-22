@@ -26,7 +26,7 @@ StartScript
 
 if ! which scan-build ; then
 
-    if ! which scan-build-19 ; then
+    if ! which scan-build-21 ; then
 
         echo "SCAN-BUILD tool from LLVM is not installed!"
         echo "See https://clang-analyzer.llvm.org/scan-build.html for details."
@@ -34,7 +34,7 @@ if ! which scan-build ; then
 
     else
 
-        SCAN_BUILD_BIN=scan-build-19
+        SCAN_BUILD_BIN=scan-build-21
 
     fi
 
@@ -84,7 +84,7 @@ $SCAN_BUILD_BIN $CMAKE_BINARY -G "Unix Makefiles" \
       -DBUILD_WITH_QT6=$BUILD_WITH_QT6 \
       -DENABLE_ASAN=OFF \
       -Wno-dev \
-      ..
+      ../plugin
 
 # Print the skipped directories taken from the config file.
 
