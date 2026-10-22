@@ -277,7 +277,10 @@ private Q_SLOTS:
         m_stub->requests.clear();
         m_talker->searchByFileName(QStringLiteral("x.jpg"));
         QVERIFY(spy.wait(5000));
-        req = m_stub->requests.at(0);
+        // The stub records the request before replying, so the successful
+        // spy wait guarantees exactly one new request was recorded.
+        QCOMPARE(m_stub->requests.size(), 1);
+        req = m_stub->requests.at(0);   // cppcheck-suppress containerOutOfBounds
         QVERIFY(!req.body.contains(QStringLiteral("albumIds")));
     }
 
