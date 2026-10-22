@@ -786,8 +786,9 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         else if (reason.isArray())
         {
             QStringList reasons;
+            const QJsonArray entries = reason.toArray();
 
-            for (const QJsonValue& entry : reason.toArray())
+            for (const QJsonValue& entry : entries)
             {
                 if (entry.isString())
                 {
