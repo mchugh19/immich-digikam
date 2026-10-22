@@ -32,8 +32,8 @@ namespace DigikamGenericImmichPlugin
 namespace
 {
 
-// Function-local statics, not namespace-scope QStrings: a
-// non-POD global is constructed before main() and destroyed
+// Function-local static variables, not namespace-scope QStrings:
+// a non-POD global is constructed before main() and destroyed
 // after it, which clazy rightly flags.
 const QString& walletFolder()
 {
