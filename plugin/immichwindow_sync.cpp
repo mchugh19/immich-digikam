@@ -83,7 +83,6 @@ void ImmichWindow::maybeStartSync()
     d->syncNextIndex = 0;
     d->syncFetchInFlight = 0;
     d->syncPatchInFlight = 0;
-    d->syncProcessed = 0;
     d->status->setText(i18n("Syncing metadata for %1 already-uploaded items...")
                            .arg(d->syncJobs.size()));
     pumpSyncFetches();
@@ -158,8 +157,7 @@ void ImmichWindow::slotSyncRecord(const QString& assetId, const QJsonObject& rec
         // Only Immich moved: leave its state exactly as it is
         // and refresh the snapshot to match.
         ++d->syncClean;
-        ++d->syncProcessed;
-        storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.checksum, job->dk);
+        storeSnapshot(assetId, sv.fields, sv.updatedAt, job->dk);
         pumpSyncFetches();
         checkSyncPhaseDone();
         return;
@@ -254,7 +252,6 @@ void ImmichWindow::slotAssetPatched(const QString& assetId, int httpStatus)
 void ImmichWindow::finishSyncAsset(const QString& assetId)
 {
     const Private::SyncAssetCtx ctx = d->syncCtx.take(assetId);
-    ++d->syncProcessed;
 
     const Private::SyncJob* job = nullptr;
 
@@ -311,8 +308,7 @@ void ImmichWindow::finishSyncAsset(const QString& assetId)
             }
         }
 
-        storeSnapshot(assetId, after, ctx.server.updatedAt,
-                      ctx.server.checksum, job->dk);
+        storeSnapshot(assetId, after, ctx.server.updatedAt, job->dk);
     }
 
     checkSyncPhaseDone();
@@ -474,11 +470,10 @@ void ImmichWindow::finishSync()
 }
 
 void ImmichWindow::storeSnapshot(const QString& assetId, const SyncFields& serverFields,
-                                 const QString& serverUpdatedAt, const QString& checksum,
+                                 const QString& serverUpdatedAt,
                                  const SyncFields& dkFields)
 {
     SyncSnapshot snap;
-    snap.checksum        = checksum;
     snap.serverUpdatedAt = serverUpdatedAt;
     snap.serverHash      = syncFieldHash(serverFields);
     snap.dkHash          = syncFieldHash(dkFields);

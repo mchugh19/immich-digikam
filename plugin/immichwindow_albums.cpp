@@ -267,8 +267,6 @@ void ImmichWindow::refreshTileStyles()
 
 void ImmichWindow::setListingLoading(bool loading)
 {
-    d->listingLoading = loading;
-
     // One loading state for whichever source is being listed:
     // the current source's overlay shows while its listing is in
     // flight, and clearing the state lowers both overlays, so a
@@ -338,7 +336,6 @@ void ImmichWindow::slotSourceChanged()
     d->previewAssets.clear();
     dropThumbJobs(false);
     dropThumbJobs(true);
-    ++d->previewGen;
 
     if (!d->downloading)
     {

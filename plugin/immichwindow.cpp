@@ -655,7 +655,6 @@ void ImmichWindow::showEvent(QShowEvent* event)
     {
         if (!d->connected)
         {
-            d->connecting = true;
             d->status->setText(i18n("Connecting..."));
         }
 
@@ -724,7 +723,6 @@ void ImmichWindow::slotConnect()
     }
 
     slotSaveSettings();
-    d->connecting = true;
     d->status->setText(i18n("Connecting..."));
     slotRefreshAlbums();
 }
@@ -732,7 +730,6 @@ void ImmichWindow::slotConnect()
 void ImmichWindow::setConnected(bool connected)
 {
     d->connected  = connected;
-    d->connecting = false;
     updateConnectionUi();
 
     if (connected)
@@ -828,13 +825,11 @@ void ImmichWindow::slotError(const QString& msg)
     {
         // An idle-time error is the listing's failure mode:
         // the load is over either way, so the spinner stops.
-        // It also ends any connect attempt in flight; the
-        // window's connected state is unchanged (an attempt
+        // The window's connected state is unchanged (an attempt
         // that fails before the first success leaves it
         // unconnected, and a later refresh failing does not
         // disconnect a working window).
         setListingLoading(false);
-        d->connecting = false;
     }
 
     if (d->cancelling)

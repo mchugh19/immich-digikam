@@ -168,7 +168,7 @@ private:
     void applyNextBulkTag();
     void finishSync();
     void storeSnapshot(const QString& assetId, const SyncFields& serverFields,
-                       const QString& serverUpdatedAt, const QString& checksum,
+                       const QString& serverUpdatedAt,
                        const SyncFields& dkFields);
     void nextDownload();
     void continueDownloads();

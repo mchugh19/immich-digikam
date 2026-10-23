@@ -146,7 +146,8 @@ private Q_SLOTS:
     {
         const SyncPlan plan = planSync(fields({ QStringLiteral("A") }, 4, QStringLiteral("x")),
                                        fields({ QStringLiteral("A") }, 4, QStringLiteral("x")));
-        QVERIFY(!plan.any());
+        QVERIFY(plan.tagsToAdd.isEmpty());
+        QVERIFY(!plan.scalars());
     }
 
     void planTagsAreAddOnly()

@@ -166,11 +166,6 @@ void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray&
         return;
     }
 
-    if (match.candidates > 1)
-    {
-        ++d->matchedMulti;
-    }
-
     d->identityCandidateId  = match.assetId;
     d->identityStackId      = match.stackId;
     d->identityStrict       = match.strictTime;
@@ -258,7 +253,6 @@ void ImmichWindow::finishIdentityCheck(const QImage& localImage, const QByteArra
         }
 
         queueSyncJob(d->identityCandidateId, path, dkFieldsFor(url));
-        ++d->matchedSync;
         ++d->done;
         d->progress->setValue(d->done);
         nextIdentity();

@@ -272,7 +272,6 @@ void ImmichWindow::startPreview(const QString& sourceId)
 
     d->previewSourceId = sourceId;
     d->listingKey      = key;
-    ++d->previewGen;
     d->previewList->clear();
     d->previewAssets.clear();
     dropThumbJobs(false);

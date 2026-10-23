@@ -137,7 +137,6 @@ public:
     QStackedLayout* albumStack = nullptr;
     QWidget*      albumLoadingOverlay = nullptr;
     SpinnerWidget* albumSpinner = nullptr;
-    bool          listingLoading = false;
     QListWidget*  tagGrid     = nullptr;
     QWidget*      tagArea     = nullptr;
     QStackedLayout* tagStack  = nullptr;
@@ -186,7 +185,6 @@ public:
     QString               thumbCacheDir;
     QHash<QString, QPixmap> thumbCache;
     QHash<QString, QPixmap> coverCache;
-    int                   previewGen     = 0;
 
     // The thumbnail pipeline serves both the preview grid and
     // the album covers on the album tiles, a few fetches at a
@@ -240,7 +238,6 @@ public:
     // has been loaded successfully the window is unconnected
     // and everything below the connection settings is disabled.
     bool         connected     = false;
-    bool         connecting    = false;
     bool         dlListing     = false;
 
     // Metadata sync for files the upload check found already on
@@ -271,8 +268,6 @@ public:
     bool         identityWaitingLocal = false;
     int          identityPass = 1;      // 1 = target-album scope, 2 = library
     bool         identitySearching = false;
-    int          matchedSync   = 0;
-    int          matchedMulti  = 0;
     int          stackedCount  = 0;
     int          trashFallbackCount = 0;
     QHash<QString, QString> replaceOldByPath;
@@ -282,7 +277,6 @@ public:
     public:
         QString oldId;
         QString newId;
-        QString localPath;
         QString stackId;   // the old copy's stack, if it has one
     };
     QList<ReplaceCtx> replaces;
@@ -316,7 +310,6 @@ public:
     int          syncNextIndex = 0;
     int          syncFetchInFlight = 0;
     int          syncPatchInFlight = 0;
-    int          syncProcessed = 0;
     static constexpr int maxSyncFetches = 6;
     class SyncAssetCtx
     {

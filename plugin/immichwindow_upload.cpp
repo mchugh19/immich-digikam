@@ -107,7 +107,6 @@ void ImmichWindow::slotUploadSelection()
     d->syncNextIndex = 0;
     d->syncFetchInFlight = 0;
     d->syncPatchInFlight = 0;
-    d->syncProcessed = 0;
     d->syncUpdated   = 0;
     d->syncClean     = 0;
     d->syncFailed    = 0;
@@ -125,8 +124,6 @@ void ImmichWindow::slotUploadSelection()
     d->identityWaitingThumb = false;
     d->identityPass = 1;
     d->identitySearching = false;
-    d->matchedSync   = 0;
-    d->matchedMulti  = 0;
     d->stackedCount  = 0;
     d->trashFallbackCount = 0;
     d->overwriteCount = 0;
@@ -284,7 +281,7 @@ void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*
         // sent is what the server now holds (the sidecar merge
         // may add preserved fields, but the synced fields are
         // these). The next run diffs against this.
-        storeSnapshot(assetId, d->currentUploadFields, QString(), QString(),
+        storeSnapshot(assetId, d->currentUploadFields, QString(),
                       d->currentUploadFields);
         d->haveUploadFields = false;
     }
@@ -300,7 +297,6 @@ void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*
         Private::ReplaceCtx ctx;
         ctx.oldId     = replacedOld;
         ctx.newId     = assetId;
-        ctx.localPath = d->currentUploadPath;
         ctx.stackId   = d->replaceStackByPath.take(d->currentUploadPath);
         d->replaces.append(ctx);
 

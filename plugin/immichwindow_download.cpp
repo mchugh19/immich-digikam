@@ -114,7 +114,6 @@ void ImmichWindow::slotDownloadAlbum()
     d->listingPurpose = Private::ListingPurpose::Download;
     d->listingKey     = (d->sourceIsTags ? QStringLiteral("tag:")
                                          : QStringLiteral("album:")) + sourceId;
-    ++d->previewGen;
     dropThumbJobs(false);
 
     setTransferButtonsEnabled(false);
@@ -292,7 +291,7 @@ void ImmichWindow::slotAssetRecord(const QString& assetId, const QString& target
     writeRecordSidecar(targetFile, sv.fields);
 
     // Post-pull snapshot: digiKam now holds the server's fields.
-    storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.checksum, sv.fields);
+    storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.fields);
 
     slotDownloadFinished(assetId, true);
 }
@@ -303,7 +302,7 @@ void ImmichWindow::slotMetaRecord(const QString& assetId, const QString& targetF
     const ServerFields sv = serverFieldsFromRecord(record);
     const bool updated = writeRecordSidecar(targetFile, sv.fields);
 
-    storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.checksum, sv.fields);
+    storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.fields);
 
     slotMetaFinished(assetId, updated);
 }
