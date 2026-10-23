@@ -24,48 +24,36 @@
 #include <cmath>
 #include <utility>
 
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QFrame>
 #include <QComboBox>
 #include <QDateTime>
 #include <QHash>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
-#include <QImageReader>
 #include <QPixmap>
-#include <QShowEvent>
 #include <QRadioButton>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
-#include <QStackedLayout>
 #include <QStandardPaths>
-#include <QPainter>
-#include <QTimer>
 #include <QVBoxLayout>
 
 // KDE includes
 
 #include <KFile>
-#include <KUrlRequester>
 #include <klocalizedstring.h>
 
 // Local includes
 
 #include "dinfointerface.h"
-#include "dmetadata.h"
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
-#include "immichxmp.h"
 
 namespace DigikamGenericImmichPlugin
 {
@@ -84,7 +72,7 @@ void ImmichWindow::startRestoreOrSync()
     // library, in the stack). Only when all of that has landed
     // does the metadata sync start.
     d->restoring    = true;
-    d->restoreQueue = d->replaces;
+    d->restoreQueue = std::move(d->replaces);
     d->status->setText(i18n("Replacing %1 edited photo(s) in Immich...")
                            .arg(d->restoreQueue.size()));
     restoreNext();
@@ -111,13 +99,17 @@ void ImmichWindow::restoreNext()
         return;
     }
 
+    d->restoreWaitingAlbums = true;
     d->talker->listAlbumsForAsset(d->restoreQueue.constFirst().oldId);
 }
 
 void ImmichWindow::slotRestoreAlbums(const QString& assetId, const QStringList& albumIds)
 {
-    if (!d->restoring || d->restoreQueue.isEmpty()
-        || d->restoreQueue.constFirst().oldId != assetId)
+    d->restoreWaitingAlbums = false;
+
+    const Private::ReplaceCtx* const head = Private::queueHead(d->restoreQueue);
+
+    if (!d->restoring || !head || head->oldId != assetId)
     {
         return;
     }
@@ -181,13 +173,14 @@ void ImmichWindow::restoreStackStep()
 void ImmichWindow::slotStackFetched(const QString& stackId, const QStringList& memberIds,
                                     int httpStatus)
 {
-    if (!d->restoring || d->restoreQueue.isEmpty()
-        || d->restoreQueue.constFirst().stackId != stackId)
+    const Private::ReplaceCtx* const head = Private::queueHead(d->restoreQueue);
+
+    if (!d->restoring || !head || head->stackId != stackId)
     {
         return;
     }
 
-    const Private::ReplaceCtx& ctx = d->restoreQueue.constFirst();
+    const Private::ReplaceCtx& ctx = *head;
     QStringList members { ctx.newId };
 
     if (httpStatus >= 200 && httpStatus < 300)
@@ -215,8 +208,9 @@ void ImmichWindow::slotStackFetched(const QString& stackId, const QStringList& m
 void ImmichWindow::slotStackCreated(const QString& firstAssetId, const QString& stackId,
                                     int httpStatus)
 {
-    if (!d->restoring || d->restoreQueue.isEmpty()
-        || d->restoreQueue.constFirst().newId != firstAssetId)
+    const Private::ReplaceCtx* const head = Private::queueHead(d->restoreQueue);
+
+    if (!d->restoring || !head || head->newId != firstAssetId)
     {
         return;
     }
@@ -244,12 +238,9 @@ void ImmichWindow::slotAssetsDeleted(int httpStatus)
         d->trashFallbackCount = d->restoreTrashQueue.size();
         d->overwriteCount     = d->overwriteQueue.size();
 
-        for (const QString& oldId : std::as_const(d->restoreTrashQueue))
-        {
-            d->syncState.remove(oldId);
-        }
+        const QStringList removed = d->restoreTrashQueue + d->overwriteQueue;
 
-        for (const QString& oldId : std::as_const(d->overwriteQueue))
+        for (const QString& oldId : removed)
         {
             d->syncState.remove(oldId);
         }

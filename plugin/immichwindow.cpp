@@ -23,7 +23,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include <QCryptographicHash>
+#include <QBuffer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -33,10 +33,9 @@
 #include <QDateTime>
 #include <QHash>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
-#include <QImageReader>
+#include <QImage>
 #include <QPixmap>
 #include <QShowEvent>
 #include <QRadioButton>
@@ -47,8 +46,6 @@
 #include <QSet>
 #include <QStackedLayout>
 #include <QStandardPaths>
-#include <QPainter>
-#include <QTimer>
 #include <QVBoxLayout>
 
 // KDE includes
@@ -60,16 +57,52 @@
 // Local includes
 
 #include "dinfointerface.h"
-#include "dmetadata.h"
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
 #include "thumbnailloadthread.h"
 #include "thumbnailinfo.h"
-#include "immichxmp.h"
 
 namespace DigikamGenericImmichPlugin
 {
+
+namespace
+{
+
+// The loading overlay shown over a source grid while its listing
+// is in flight: a throbber and a label in a small panel, centred
+// over the grid, so a slow server reads as "loading" rather than
+// as an empty or stale view. The caller adds the overlay to the
+// grid's stacked layout; the spinner is handed back so the
+// caller can start and stop it.
+QWidget* makeLoadingOverlay(QWidget* const parent, const QString& text, SpinnerWidget** spinner)
+{
+    auto* const overlay = new QWidget(parent);
+
+    auto* const overlayLayout = new QVBoxLayout(overlay);
+    overlayLayout->addStretch();
+
+    auto* const loadingCard = new QFrame(overlay);
+    loadingCard->setFrameShape(QFrame::StyledPanel);
+    loadingCard->setAutoFillBackground(true);
+    auto* const cardLayout = new QVBoxLayout(loadingCard);
+    *spinner = new SpinnerWidget(loadingCard);
+    cardLayout->addWidget(*spinner, 0, Qt::AlignHCenter);
+    auto* const loadingLabel = new QLabel(text, loadingCard);
+    loadingLabel->setAlignment(Qt::AlignHCenter);
+    cardLayout->addWidget(loadingLabel);
+
+    auto* const cardRow = new QHBoxLayout;
+    cardRow->addStretch();
+    cardRow->addWidget(loadingCard);
+    cardRow->addStretch();
+    overlayLayout->addLayout(cardRow);
+    overlayLayout->addStretch();
+
+    return overlay;
+}
+
+} // namespace
 
 ImmichWindow::ImmichWindow(DInfoInterface* const iface,
                            ImmichSession* const session, Mode mode,
@@ -214,27 +247,8 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     d->albumStack = new QStackedLayout(d->albumArea);
     d->albumStack->setStackingMode(QStackedLayout::StackAll);
     d->albumStack->addWidget(d->albumGrid);
-    d->albumLoadingOverlay = new QWidget(d->albumArea);
-
-    auto* const overlayLayout = new QVBoxLayout(d->albumLoadingOverlay);
-    overlayLayout->addStretch();
-
-    auto* const loadingCard = new QFrame(d->albumLoadingOverlay);
-    loadingCard->setFrameShape(QFrame::StyledPanel);
-    loadingCard->setAutoFillBackground(true);
-    auto* const cardLayout = new QVBoxLayout(loadingCard);
-    d->albumSpinner = new SpinnerWidget(loadingCard);
-    cardLayout->addWidget(d->albumSpinner, 0, Qt::AlignHCenter);
-    auto* const loadingLabel = new QLabel(i18n("Loading albums..."), loadingCard);
-    loadingLabel->setAlignment(Qt::AlignHCenter);
-    cardLayout->addWidget(loadingLabel);
-
-    auto* const cardRow = new QHBoxLayout;
-    cardRow->addStretch();
-    cardRow->addWidget(loadingCard);
-    cardRow->addStretch();
-    overlayLayout->addLayout(cardRow);
-    overlayLayout->addStretch();
+    d->albumLoadingOverlay = makeLoadingOverlay(d->albumArea, i18n("Loading albums..."),
+                                                &d->albumSpinner);
 
     d->albumStack->addWidget(d->albumLoadingOverlay);
     d->albumStack->setCurrentWidget(d->albumGrid);
@@ -260,7 +274,24 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     d->tagGrid->setWordWrap(true);
     d->tagGrid->setUniformItemSizes(true);
     d->tagGrid->setMinimumHeight(104 + 16);
-    d->tagGrid->setVisible(false);
+
+    // The tag grid gets an area of its own, built like the album
+    // area (grid plus loading overlay in a stacked layout), so a
+    // tag listing in flight shows the same loading state. The
+    // area starts hidden: Albums is the default source.
+    d->tagArea            = new QWidget;
+    d->tagArea->setMinimumHeight(104 + 16);
+    d->tagStack           = new QStackedLayout(d->tagArea);
+    d->tagStack->setStackingMode(QStackedLayout::StackAll);
+    d->tagStack->addWidget(d->tagGrid);
+    d->tagLoadingOverlay  = makeLoadingOverlay(d->tagArea, i18n("Loading tags..."),
+                                               &d->tagSpinner);
+    d->tagStack->addWidget(d->tagLoadingOverlay);
+    d->tagStack->setCurrentWidget(d->tagGrid);
+    d->tagLoadingOverlay->setVisible(false);
+    d->tagSpinner->toggleTimer(false);
+    d->tagArea->setVisible(false);
+
     d->previewList      = new QListWidget;
     d->previewList->setViewMode(QListWidget::IconMode);
     // Display only: Download always takes the whole album or
@@ -334,14 +365,49 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // it.
     auto* const content = new QWidget;
     auto* const layout  = new QVBoxLayout(content);
-    layout->addLayout(form);
+
+    // The Immich logo beside the connection settings, linking to
+    // the Immich web site, as in the other web-service tools.
+
+    auto* const logo = new QLabel;
+    logo->setContentsMargins(QMargins());
+    logo->setScaledContents(false);
+    logo->setOpenExternalLinks(true);
+    logo->setTextFormat(Qt::RichText);
+    logo->setFocusPolicy(Qt::NoFocus);
+    logo->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    logo->setSizePolicy(QSizePolicy(QSizePolicy::Minimum, QSizePolicy::Minimum));
+    logo->setToolTip(i18n("Visit Immich website"));
+    logo->setAlignment(Qt::AlignLeft);
+
+    const QImage logoImg = QImage(QStandardPaths::locate(QStandardPaths::GenericDataLocation,
+                                                         QLatin1String("digikam/data/logo-immich.webp")));
+
+    QByteArray logoData;
+    QBuffer    logoBuffer(&logoData);
+    logoImg.save(&logoBuffer, "PNG");
+    logo->setText(QString::fromLatin1("<a href=\"%1\">%2</a>")
+                  .arg(QLatin1String("https://immich.app"))
+                  .arg(QString::fromLatin1("<img src=\"data:image/png;base64,%1\">")
+                       .arg(QLatin1String(logoData.toBase64().data()))));
 
     // The settings action sits with the settings it belongs to,
     // at natural width, instead of stretching across the dialog.
     auto* const settingsBtnRow = new QHBoxLayout;
     settingsBtnRow->addWidget(d->connectBtn);
     settingsBtnRow->addStretch();
-    layout->addLayout(settingsBtnRow);
+
+    // The logo shares the connection block's height instead of
+    // taking a banner row of its own: logo on the left, the
+    // server settings and the Connect button stacked beside it.
+    auto* const headerSide = new QVBoxLayout;
+    headerSide->addLayout(form);
+    headerSide->addLayout(settingsBtnRow);
+
+    auto* const headerRow = new QHBoxLayout;
+    headerRow->addWidget(logo, 0, Qt::AlignTop);
+    headerRow->addLayout(headerSide, 1);
+    layout->addLayout(headerRow);
 
     // A rule between the server settings and the working view,
     // with air around it: the hairline alone, wedged directly
@@ -397,14 +463,14 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
         pickerLayout->addLayout(filterRow);
         pickerLayout->addWidget(d->albumArea, 2);
         layout->addWidget(d->pickerBox, 2);
-        layout->addWidget(d->tagGrid, 2);
+        layout->addWidget(d->tagArea, 2);
     }
     else
     {
         layout->addWidget(d->filterEdit);
         layout->addLayout(sourceRow);
         layout->addWidget(d->albumArea, 2);
-        layout->addWidget(d->tagGrid, 2);
+        layout->addWidget(d->tagArea, 2);
     }
 
     if (d->mode == Mode::Import)
@@ -582,7 +648,6 @@ void ImmichWindow::showEvent(QShowEvent* event)
     {
         if (!d->connected)
         {
-            d->connecting = true;
             d->status->setText(i18n("Connecting..."));
         }
 
@@ -616,10 +681,46 @@ void ImmichWindow::updateExportStatus()
     d->status->setText(text);
 }
 
-void ImmichWindow::slotSaveSettings()
+void ImmichWindow::syncSessionFromEdits()
 {
     d->session->setUrl(d->urlEdit->text());
     d->session->setApiKey(d->keyEdit->text());
+}
+
+QString ImmichWindow::listingKeyFor(const QString& sourceId) const
+{
+    return (d->sourceIsTags ? QStringLiteral("tag:")
+                            : QStringLiteral("album:")) + sourceId;
+}
+
+void ImmichWindow::listSourceAssets(const QString& sourceId)
+{
+    if (d->sourceIsTags)
+    {
+        d->talker->listTagAssets(sourceId);
+    }
+    else
+    {
+        d->talker->listAlbumAssets(sourceId);
+    }
+}
+
+QListWidgetItem* ImmichWindow::findGridItem(QListWidget* grid, const QString& id) const
+{
+    for (int i = 0 ; i < grid->count() ; ++i)
+    {
+        if (grid->item(i)->data(Qt::UserRole).toString() == id)
+        {
+            return grid->item(i);
+        }
+    }
+
+    return nullptr;
+}
+
+void ImmichWindow::slotSaveSettings()
+{
+    syncSessionFromEdits();
     d->session->save();
     d->status->setText(i18n("Settings saved."));
 }
@@ -651,7 +752,6 @@ void ImmichWindow::slotConnect()
     }
 
     slotSaveSettings();
-    d->connecting = true;
     d->status->setText(i18n("Connecting..."));
     slotRefreshAlbums();
 }
@@ -659,7 +759,6 @@ void ImmichWindow::slotConnect()
 void ImmichWindow::setConnected(bool connected)
 {
     d->connected  = connected;
-    d->connecting = false;
     updateConnectionUi();
 
     if (connected)
@@ -678,13 +777,12 @@ void ImmichWindow::updateConnectionUi()
     // than a blank form to guess at. The connection controls
     // themselves (URL, API key, Connect) always stay usable.
     const bool on   = d->connected;
-    const bool idle = !d->uploading && !d->downloading;
 
-    d->newAlbumBtn->setEnabled(on);
+    refreshActionButtons();
     d->replaceCombo->setEnabled(on);
     d->filterEdit->setEnabled(on);
     d->albumArea->setEnabled(on);
-    d->tagGrid->setEnabled(on);
+    d->tagArea->setEnabled(on);
     d->previewList->setEnabled(on);
     d->previewSort->setEnabled(on);
     d->albumsSrc->setEnabled(on);
@@ -692,7 +790,7 @@ void ImmichWindow::updateConnectionUi()
     d->libraryRadio->setEnabled(on);
     d->albumRadio->setEnabled(on);
     d->downloadDirEdit->setEnabled(on);
-    startButton()->setEnabled(on && idle);
+
 }
 
 void ImmichWindow::applyTargetMode()
@@ -722,11 +820,19 @@ void ImmichWindow::updateTargetLabel()
                                 : i18n("Upload target: %1").arg(name));
 }
 
+void ImmichWindow::refreshActionButtons()
+{
+    const bool active = d->connected && !d->uploading && !d->downloading;
+    d->newAlbumBtn->setEnabled(active);
+    startButton()->setEnabled(active);
+}
+
 void ImmichWindow::setTransferButtonsEnabled(bool enabled)
 {
-    d->newAlbumBtn->setEnabled(enabled);
+    // Connect follows the caller's transfer phase; the action
+    // buttons derive from the window state in one place.
     d->connectBtn->setEnabled(enabled);
-    startButton()->setEnabled(enabled && d->connected);
+    refreshActionButtons();
 }
 
 void ImmichWindow::slotCancelTransfer()
@@ -737,12 +843,9 @@ void ImmichWindow::slotCancelTransfer()
     }
 
     d->cancelling = true;
-    d->pending.clear();
+    clearExportQueues();
     d->dlPending.clear();
     d->metaPending.clear();
-    d->identityQueue.clear();
-    d->identityWaitingThumb = false;
-    d->restoring = false;
     d->status->setText(i18n("Cancelling..."));
     d->talker->cancel();
 }
@@ -751,15 +854,13 @@ void ImmichWindow::slotError(const QString& msg)
 {
     if (!d->uploading && !d->downloading)
     {
-        // An idle-time error is the album list's failure mode:
+        // An idle-time error is the listing's failure mode:
         // the load is over either way, so the spinner stops.
-        // It also ends any connect attempt in flight; the
-        // window's connected state is unchanged (an attempt
+        // The window's connected state is unchanged (an attempt
         // that fails before the first success leaves it
         // unconnected, and a later refresh failing does not
         // disconnect a working window).
-        setAlbumLoading(false);
-        d->connecting = false;
+        setListingLoading(false);
     }
 
     if (d->cancelling)
@@ -788,6 +889,30 @@ void ImmichWindow::slotError(const QString& msg)
         d->checking = false;
         d->status->setText(i18n("Duplicate check failed (%1); uploading everything.").arg(msg));
         nextUpload();
+        return;
+    }
+
+    if (d->identitySearching)
+    {
+        // The identity search is an optimisation too: a failed
+        // search leaves the file unverified, so it uploads as
+        // new (identical bytes still come back "duplicate"
+        // from the server) instead of stalling the batch.
+        d->identitySearching = false;
+        d->status->setText(i18n("Existing-copy check failed (%1); uploading as new.").arg(msg));
+        d->uploadQueue.append(d->identityUrl);
+        nextIdentity();
+        return;
+    }
+
+    if (d->restoreWaitingAlbums)
+    {
+        // The album listing for the copy being replaced failed:
+        // continue with no albums, the same landing as an empty
+        // reply, rather than stalling the replace chain.
+        d->restoreWaitingAlbums = false;
+        d->status->setText(msg);
+        slotRestoreAlbums(d->restoreQueue.constFirst().oldId, QStringList());
         return;
     }
 

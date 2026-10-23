@@ -24,48 +24,36 @@
 #include <cmath>
 #include <utility>
 
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QFrame>
 #include <QComboBox>
 #include <QDateTime>
 #include <QHash>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
-#include <QImageReader>
 #include <QPixmap>
-#include <QShowEvent>
 #include <QRadioButton>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
-#include <QStackedLayout>
 #include <QStandardPaths>
-#include <QPainter>
-#include <QTimer>
 #include <QVBoxLayout>
 
 // KDE includes
 
 #include <KFile>
-#include <KUrlRequester>
 #include <klocalizedstring.h>
 
 // Local includes
 
 #include "dinfointerface.h"
-#include "dmetadata.h"
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
-#include "immichxmp.h"
 
 namespace DigikamGenericImmichPlugin
 {
@@ -83,7 +71,6 @@ void ImmichWindow::maybeStartSync()
     d->syncNextIndex = 0;
     d->syncFetchInFlight = 0;
     d->syncPatchInFlight = 0;
-    d->syncProcessed = 0;
     d->status->setText(i18n("Syncing metadata for %1 already-uploaded items...")
                            .arg(d->syncJobs.size()));
     pumpSyncFetches();
@@ -130,6 +117,7 @@ void ImmichWindow::slotSyncRecord(const QString& assetId, const QJsonObject& rec
     }
 
     Private::SyncAssetCtx ctx;
+    ctx.dk = job->dk;
 
     if (httpStatus != 200 || record.isEmpty())
     {
@@ -158,8 +146,7 @@ void ImmichWindow::slotSyncRecord(const QString& assetId, const QJsonObject& rec
         // Only Immich moved: leave its state exactly as it is
         // and refresh the snapshot to match.
         ++d->syncClean;
-        ++d->syncProcessed;
-        storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.checksum, job->dk);
+        storeSnapshot(assetId, sv.fields, sv.updatedAt, job->dk);
         pumpSyncFetches();
         checkSyncPhaseDone();
         return;
@@ -253,21 +240,10 @@ void ImmichWindow::slotAssetPatched(const QString& assetId, int httpStatus)
 
 void ImmichWindow::finishSyncAsset(const QString& assetId)
 {
+    const bool haveCtx = d->syncCtx.contains(assetId);
     const Private::SyncAssetCtx ctx = d->syncCtx.take(assetId);
-    ++d->syncProcessed;
 
-    const Private::SyncJob* job = nullptr;
-
-    for (const Private::SyncJob& candidate : std::as_const(d->syncJobs))
-    {
-        if (candidate.assetId == assetId)
-        {
-            job = &candidate;
-            break;
-        }
-    }
-
-    if (ctx.failed || !job)
+    if (ctx.failed || !haveCtx)
     {
         ++d->syncFailed;
     }
@@ -311,8 +287,7 @@ void ImmichWindow::finishSyncAsset(const QString& assetId)
             }
         }
 
-        storeSnapshot(assetId, after, ctx.server.updatedAt,
-                      ctx.server.checksum, job->dk);
+        storeSnapshot(assetId, after, ctx.server.updatedAt, ctx.dk);
     }
 
     checkSyncPhaseDone();
@@ -474,11 +449,10 @@ void ImmichWindow::finishSync()
 }
 
 void ImmichWindow::storeSnapshot(const QString& assetId, const SyncFields& serverFields,
-                                 const QString& serverUpdatedAt, const QString& checksum,
+                                 const QString& serverUpdatedAt,
                                  const SyncFields& dkFields)
 {
     SyncSnapshot snap;
-    snap.checksum        = checksum;
     snap.serverUpdatedAt = serverUpdatedAt;
     snap.serverHash      = syncFieldHash(serverFields);
     snap.dkHash          = syncFieldHash(dkFields);

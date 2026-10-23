@@ -124,8 +124,8 @@ void ImmichPlugin::setup(QObject* const parent)
     exportAction->setObjectName(QLatin1String("export_immich"));
     exportAction->setActionCategory(DPluginAction::GenericExport);
 
-    connect(exportAction, SIGNAL(triggered(bool)),
-            this, SLOT(slotExport()));
+    connect(exportAction, &DPluginAction::triggered,
+            this, &ImmichPlugin::slotExport);
 
     addAction(exportAction);
 
@@ -135,8 +135,8 @@ void ImmichPlugin::setup(QObject* const parent)
     importAction->setObjectName(QLatin1String("import_immich"));
     importAction->setActionCategory(DPluginAction::GenericImport);
 
-    connect(importAction, SIGNAL(triggered(bool)),
-            this, SLOT(slotImport()));
+    connect(importAction, &DPluginAction::triggered,
+            this, &ImmichPlugin::slotImport);
 
     addAction(importAction);
 }

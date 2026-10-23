@@ -23,12 +23,9 @@
 #include <algorithm>
 #include <cmath>
 
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QFrame>
 #include <QComboBox>
 #include <QDateTime>
 #include <QHash>
@@ -36,9 +33,7 @@
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
-#include <QImageReader>
 #include <QPixmap>
-#include <QShowEvent>
 #include <QRadioButton>
 #include <QLineEdit>
 #include <QListWidget>
@@ -47,24 +42,19 @@
 #include <QSet>
 #include <QStackedLayout>
 #include <QStandardPaths>
-#include <QPainter>
-#include <QTimer>
 #include <QVBoxLayout>
 
 // KDE includes
 
 #include <KFile>
-#include <KUrlRequester>
 #include <klocalizedstring.h>
 
 // Local includes
 
 #include "dinfointerface.h"
-#include "dmetadata.h"
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
-#include "immichxmp.h"
 
 namespace DigikamGenericImmichPlugin
 {
@@ -110,19 +100,18 @@ QString dateRangeText(const QString& startIso, const QString& endIso)
              from.toString(QStringLiteral("yyyy")));
 }
 
+// Albums and tags both sort by name, case-insensitively.
+template <typename T>
+bool byName(const T& a, const T& b)
+{
+    return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
+}
+
 } // namespace
 
 QListWidgetItem* ImmichWindow::findAlbumItem(const QString& id) const
 {
-    for (int i = 0 ; i < d->albumGrid->count() ; ++i)
-    {
-        if (d->albumGrid->item(i)->data(Qt::UserRole).toString() == id)
-        {
-            return d->albumGrid->item(i);
-        }
-    }
-
-    return nullptr;
+    return findGridItem(d->albumGrid, id);
 }
 
 QString ImmichWindow::currentSourceId() const
@@ -217,9 +206,11 @@ void ImmichWindow::addAlbumTile(const QString& id, const QString& name,
 
     if (!thumbnailAssetId.isEmpty())
     {
-        const auto cached = d->coverCache.constFind(id);
+        // Covers live in the one thumbnail cache, keyed by the
+        // cover's asset id like every other thumbnail.
+        const auto cached = d->thumbCache.constFind(thumbnailAssetId);
 
-        if (cached != d->coverCache.constEnd())
+        if (cached != d->thumbCache.constEnd())
         {
             setAlbumCover(item, *cached);
         }
@@ -265,34 +256,45 @@ void ImmichWindow::refreshTileStyles()
     }
 }
 
-void ImmichWindow::setAlbumLoading(bool loading)
+void ImmichWindow::setListingLoading(bool loading)
 {
-    d->albumsLoading = loading;
-
-    if (!d->albumStack || !d->albumLoadingOverlay)
+    // One loading state for whichever source is being listed:
+    // the current source's overlay shows while its listing is in
+    // flight, and clearing the state lowers both overlays, so a
+    // listing that finishes after the source was switched cannot
+    // leave one stuck up.
+    const auto apply = [loading](QStackedLayout* const stack, QWidget* const grid,
+                                 QWidget* const overlay, SpinnerWidget* const spinner,
+                                 bool active)
     {
-        return;
-    }
+        if (!stack || !overlay)
+        {
+            return;
+        }
 
-    d->albumLoadingOverlay->setVisible(loading);
-    d->albumStack->setCurrentWidget(loading ? static_cast<QWidget*>(d->albumLoadingOverlay)
-                                            : static_cast<QWidget*>(d->albumGrid));
-    d->albumSpinner->toggleTimer(loading);
+        const bool show = loading && active;
+        overlay->setVisible(show);
+        stack->setCurrentWidget(show ? overlay : grid);
+        spinner->toggleTimer(show);
+    };
+
+    apply(d->albumStack, d->albumGrid, d->albumLoadingOverlay, d->albumSpinner, !d->sourceIsTags);
+    apply(d->tagStack,   d->tagGrid,   d->tagLoadingOverlay,   d->tagSpinner,    d->sourceIsTags);
 }
 
 void ImmichWindow::slotRefreshAlbums()
 {
-    d->session->setUrl(d->urlEdit->text());
-    d->session->setApiKey(d->keyEdit->text());
+    syncSessionFromEdits();
     d->session->clearListings();
 
     if (d->mode == Mode::Import && d->sourceIsTags)
     {
+        setListingLoading(true);
         d->talker->listTags();
     }
     else
     {
-        setAlbumLoading(true);
+        setListingLoading(true);
         d->talker->listAlbums();
     }
 }
@@ -317,14 +319,13 @@ void ImmichWindow::slotSourceChanged()
     }
 
     d->albumArea->setVisible(!tags);
-    d->tagGrid->setVisible(tags);
+    d->tagArea->setVisible(tags);
     d->albumGrid->clear();
     d->tagGrid->clear();
     d->previewList->clear();
     d->previewAssets.clear();
     dropThumbJobs(false);
     dropThumbJobs(true);
-    ++d->previewGen;
 
     if (!d->downloading)
     {
@@ -378,6 +379,8 @@ void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
         return;
     }
 
+    setListingLoading(false);
+
     // A listing came back: the connection works.
     setConnected(true);
 
@@ -386,11 +389,7 @@ void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
     d->tagGrid->clear();
 
     QList<ImmichTag> sorted = tags;
-    std::sort(sorted.begin(), sorted.end(),
-              [](const ImmichTag& a, const ImmichTag& b)
-              {
-                  return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
-              });
+    std::sort(sorted.begin(), sorted.end(), byName<ImmichTag>);
 
     const QIcon tagIcon(QStringLiteral(":/dk-tag.svg"));
 
@@ -402,13 +401,9 @@ void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
         item->setTextAlignment(Qt::AlignHCenter);
     }
 
-    for (int i = 0 ; i < d->tagGrid->count() ; ++i)
+    if (QListWidgetItem* const item = findGridItem(d->tagGrid, restoreId))
     {
-        if (d->tagGrid->item(i)->data(Qt::UserRole).toString() == restoreId)
-        {
-            d->tagGrid->setCurrentItem(d->tagGrid->item(i));
-            break;
-        }
+        d->tagGrid->setCurrentItem(item);
     }
 
     applyFilter();
@@ -422,8 +417,7 @@ void ImmichWindow::slotNewAlbum()
         return;
     }
 
-    d->session->setUrl(d->urlEdit->text());
-    d->session->setApiKey(d->keyEdit->text());
+    syncSessionFromEdits();
 
     bool ok = false;
     const QString name = QInputDialog::getText(this, i18n("New album"),
@@ -445,13 +439,13 @@ void ImmichWindow::slotAlbumCreated(const ImmichAlbum& album)
     // ready to be the upload target.
     d->pendingSelectId = album.id;
     d->status->setText(i18n("Album '%1' created.").arg(album.name));
-    setAlbumLoading(true);
+    setListingLoading(true);
     d->talker->listAlbums();
 }
 
 void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
 {
-    setAlbumLoading(false);
+    setListingLoading(false);
 
     // A listing came back: the connection works.
     setConnected(true);
@@ -463,11 +457,7 @@ void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
     d->albumGrid->clear();
 
     QList<ImmichAlbum> sorted = albums;
-    std::sort(sorted.begin(), sorted.end(),
-              [](const ImmichAlbum& a, const ImmichAlbum& b)
-              {
-                  return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
-              });
+    std::sort(sorted.begin(), sorted.end(), byName<ImmichAlbum>);
 
     for (const ImmichAlbum& album : sorted)
     {

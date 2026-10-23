@@ -137,8 +137,11 @@ public:
     QStackedLayout* albumStack = nullptr;
     QWidget*      albumLoadingOverlay = nullptr;
     SpinnerWidget* albumSpinner = nullptr;
-    bool          albumsLoading = false;
     QListWidget*  tagGrid     = nullptr;
+    QWidget*      tagArea     = nullptr;
+    QStackedLayout* tagStack  = nullptr;
+    QWidget*      tagLoadingOverlay = nullptr;
+    SpinnerWidget* tagSpinner = nullptr;
     QListWidget*  previewList = nullptr;
     QComboBox*    previewSort = nullptr;
     QLabel*       targetLabel = nullptr;
@@ -152,14 +155,16 @@ public:
     // Album to select after the next list refresh (a just-created
     // album, or simply the selection surviving a refresh).
     QString      pendingSelectId;
-    QList<QUrl>  pending;
+    QList<QUrl>  uploadQueue;
     QStringList  uploadedIds;
     QString      targetAlbumId;
-    QString      tempSidecar;
+    QStringList  tempSidecars;
     int          total       = 0;
     int          done        = 0;
     int          failed      = 0;
     int          alreadyThere = 0;
+    int          selectionDuplicates = 0;
+    int          uploadedCount = 0;
     bool         uploading   = false;
     bool         checking    = false;
     bool         cancelling  = false;
@@ -179,8 +184,6 @@ public:
     // sessions.
     QString               thumbCacheDir;
     QHash<QString, QPixmap> thumbCache;
-    QHash<QString, QPixmap> coverCache;
-    int                   previewGen     = 0;
 
     // The thumbnail pipeline serves both the preview grid and
     // the album covers on the album tiles, a few fetches at a
@@ -234,7 +237,6 @@ public:
     // has been loaded successfully the window is unconnected
     // and everything below the connection settings is disabled.
     bool         connected     = false;
-    bool         connecting    = false;
     bool         dlListing     = false;
 
     // Metadata sync for files the upload check found already on
@@ -254,31 +256,41 @@ public:
     // allowed to upload as new photos.
     QList<QUrl>  identityQueue;
     QUrl         identityUrl;
-    QString      identityCandidateId;
-    QString      identityStackId;
-    bool         identityStrict = false;
-    bool         identityDimsDiffer = false;
+    IdentityMatch identityMatch;
     bool         identityWaitingThumb = false;
     // The server thumbnail's bytes, held while the matching
     // local frame is loaded by the thumbnail thread.
     QByteArray   identityThumbBytes;
     bool         identityWaitingLocal = false;
     int          identityPass = 1;      // 1 = target-album scope, 2 = library
-    bool         identityNameSeen = false;
-    int          matchedSync   = 0;
-    int          matchedMulti  = 0;
+    bool         identitySearching = false;
     int          stackedCount  = 0;
     int          trashFallbackCount = 0;
-    QHash<QString, QString> replaceOldByPath;
-    QHash<QString, QString> replaceStackByPath;
+    // What a file that is about to upload replaces, keyed by
+    // its local path: the server copy it supersedes and that
+    // copy's stack.
+    class ReplaceMark
+    {
+    public:
+        QString oldId;
+        QString stackId;
+    };
+    QHash<QString, ReplaceMark> replaceByPath;
     class ReplaceCtx
     {
     public:
         QString oldId;
         QString newId;
-        QString localPath;
         QString stackId;   // the old copy's stack, if it has one
     };
+
+    // The replace at the head of a restore queue, or nullptr
+    // when it has run out: the restore slots all guard on the
+    // head matching the reply they were waiting for.
+    static const ReplaceCtx* queueHead(const QList<ReplaceCtx>& queue)
+    {
+        return queue.isEmpty() ? nullptr : &queue.constFirst();
+    }
     QList<ReplaceCtx> replaces;
     QList<ReplaceCtx> restoreQueue;
     QStringList  restoreAlbums;
@@ -291,7 +303,7 @@ public:
     QRadioButton* albumRadio   = nullptr;
     QWidget*     pickerBox     = nullptr;
     bool         restoring = false;
-    QString      currentUploadPath;
+    bool         restoreWaitingAlbums = false;
 
     QList<SyncJob> syncJobs;
     int          syncUpdated   = 0;
@@ -309,13 +321,13 @@ public:
     int          syncNextIndex = 0;
     int          syncFetchInFlight = 0;
     int          syncPatchInFlight = 0;
-    int          syncProcessed = 0;
     static constexpr int maxSyncFetches = 6;
     class SyncAssetCtx
     {
     public:
         SyncPlan     plan;
         ServerFields server;
+        SyncFields   dk;
         bool         failed = false;
         bool         wrote  = false;
     };
@@ -330,10 +342,17 @@ public:
     TagsPurpose  tagsPurpose   = TagsPurpose::Ui;
     bool         albumAssigned = false;
 
-    // Fields of the item currently uploading, kept so a sync
-    // snapshot can be recorded when it lands.
-    SyncFields   currentUploadFields;
-    bool         haveUploadFields = false;
+    // The item currently uploading: its path (the replace
+    // bookkeeping is keyed by it) and its digiKam fields, kept
+    // so a sync snapshot can be recorded when it lands.
+    class UploadInFlight
+    {
+    public:
+        QString    path;
+        SyncFields fields;
+        bool       active = false;
+    };
+    UploadInFlight uploadInFlight;
 
     // Per-asset sync snapshots (asset id -> SyncSnapshot JSON),
     // persisted across sessions; they are what tells a later run

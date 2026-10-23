@@ -23,6 +23,7 @@
 #include <QJsonObject>
 #include <QPixmap>
 
+class QListWidget;
 class QListWidgetItem;
 class QShowEvent;
 
@@ -134,7 +135,28 @@ private:
     void setTransferButtonsEnabled(bool enabled);
     void setConnected(bool connected);
     void updateConnectionUi();
-    void setAlbumLoading(bool loading);
+    /** The one owner of the New Album and Start buttons'
+     * enabled state: usable exactly when the window is
+     * connected and no transfer is running.
+     */
+    void refreshActionButtons();
+    /** Copy the connection edits into the session; every
+     * action entry point starts from what the user sees.
+     */
+    void syncSessionFromEdits();
+    /** Session cache key for a source's contents listing. */
+    QString listingKeyFor(const QString& sourceId) const;
+    /** Ask the talker for the current source's assets. */
+    void listSourceAssets(const QString& sourceId);
+    QListWidgetItem* findGridItem(QListWidget* grid, const QString& id) const;
+    /** Zero every export-run counter and queue (start of a
+     * run). clearExportQueues is the container-and-flag half,
+     * shared with the cancel path, which keeps its counters
+     * for the cancellation report.
+     */
+    void resetExportState();
+    void clearExportQueues();
+    void setListingLoading(bool loading);
     void applyFilter();
     QListWidgetItem* findAlbumItem(const QString& id) const;
     QString currentSourceId() const;
@@ -168,15 +190,31 @@ private:
     void applyNextBulkTag();
     void finishSync();
     void storeSnapshot(const QString& assetId, const SyncFields& serverFields,
-                       const QString& serverUpdatedAt, const QString& checksum,
+                       const QString& serverUpdatedAt,
                        const SyncFields& dkFields);
     void nextDownload();
     void continueDownloads();
     void nextMeta();
-    bool writeRecordSidecar(const QString& targetFile, const QJsonObject& record);
+    bool writeRecordSidecar(const QString& targetFile, const SyncFields& fields);
     void finishDownload();
-    QString sidecarFor(const QUrl& url, const QString& filePath);
+    QString sidecarFor(const SyncFields& fields, const QString& filePath);
     SyncFields dkFieldsFor(const QUrl& url) const;
+    /** Claim a server asset for this selection: appends the id
+     * to the album list and returns true on the first claim;
+     * a later file resolving to the same asset counts as a
+     * duplicate within the selection and returns false.
+     */
+    bool claimAssetId(const QString& assetId);
+    void queueSyncJob(const QString& assetId, const QString& localPath,
+                      const SyncFields& dk);
+    /** Write a generated sidecar to its temp path and register
+     * it for removal when the upload finishes; empty on failure.
+     */
+    QString writeTempSidecar(const QString& tempPath, const QString& packet);
+    /** Record the current identity match as the copy the file
+     * at path replaces once its upload lands.
+     */
+    void markReplace(const QString& path);
 
     class Private;
     Private* const d;

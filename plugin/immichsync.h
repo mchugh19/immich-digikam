@@ -39,14 +39,13 @@ public:
 // One side of the comparison, from an Immich asset record:
 // tags from the tags array, rating/description/GPS from
 // exifInfo (with the top-level rating fallback older records
-// need), plus the record's updatedAt and checksum for the
-// snapshot bookkeeping.
+// need), plus the record's updatedAt for the snapshot
+// bookkeeping.
 class ServerFields
 {
 public:
     SyncFields fields;
     QString    updatedAt;
-    QString    checksum;
 };
 
 inline ServerFields serverFieldsFromRecord(const QJsonObject& record)
@@ -101,7 +100,6 @@ inline ServerFields serverFieldsFromRecord(const QJsonObject& record)
     }
 
     out.updatedAt = record.value(QStringLiteral("updatedAt")).toString();
-    out.checksum  = record.value(QStringLiteral("checksum")).toString();
     return out;
 }
 
@@ -180,11 +178,6 @@ public:
     double      latitude      = 0.0;
     double      longitude     = 0.0;
 
-    bool any() const
-    {
-        return !tagsToAdd.isEmpty() || setRating || setDescription || setGps;
-    }
-
     bool scalars() const
     {
         return setRating || setDescription || setGps;
@@ -258,7 +251,6 @@ inline QString syncFieldHash(const SyncFields& f)
 class SyncSnapshot
 {
 public:
-    QString checksum;
     QString serverUpdatedAt;
     QString serverHash;
     QString dkHash;
@@ -266,7 +258,6 @@ public:
     QJsonObject toJson() const
     {
         return QJsonObject {
-            { QStringLiteral("checksum"),        checksum        },
             { QStringLiteral("serverUpdatedAt"), serverUpdatedAt },
             { QStringLiteral("serverHash"),      serverHash      },
             { QStringLiteral("dkHash"),          dkHash          },
@@ -276,7 +267,6 @@ public:
     static SyncSnapshot fromJson(const QJsonObject& obj)
     {
         SyncSnapshot s;
-        s.checksum        = obj.value(QStringLiteral("checksum")).toString();
         s.serverUpdatedAt = obj.value(QStringLiteral("serverUpdatedAt")).toString();
         s.serverHash      = obj.value(QStringLiteral("serverHash")).toString();
         s.dkHash          = obj.value(QStringLiteral("dkHash")).toString();
@@ -317,6 +307,7 @@ public:
     QString assetId;
     QString stackId;           // stackId of the chosen candidate
     int     candidates  = 0;   // name+dimension matches found
+    bool    nameSeen    = false;   // any candidate carried the name at all
     bool    strictTime  = false;
     // The match rests on name + exact capture time alone
     // (dimensions differ: the photo was cropped or resized).
@@ -339,6 +330,8 @@ inline IdentityMatch chooseIdentityMatch(const QList<IdentityCandidate>& candida
         {
             continue;
         }
+
+        result.nameSeen = true;
 
         const bool dims = (c.width == width && c.height == height)
                        || (c.width == height && c.height == width);

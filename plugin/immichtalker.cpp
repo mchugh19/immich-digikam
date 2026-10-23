@@ -39,6 +39,82 @@
 namespace DigikamGenericImmichPlugin
 {
 
+namespace
+{
+
+QJsonArray idsArray(const QStringList& ids)
+{
+    QJsonArray arr;
+
+    for (const QString& id : ids)
+    {
+        arr.append(id);
+    }
+
+    return arr;
+}
+
+QStringList idsFromArray(const QJsonArray& arr)
+{
+    QStringList ids;
+
+    for (const QJsonValue& v : arr)
+    {
+        ids.append(v.toObject().value(QStringLiteral("id")).toString());
+    }
+
+    return ids;
+}
+
+ImmichAlbum albumFromJson(const QJsonObject& obj)
+{
+    ImmichAlbum album;
+    album.id               = obj.value(QStringLiteral("id")).toString();
+    album.name             = obj.value(QStringLiteral("albumName")).toString();
+    album.assetCount       = obj.value(QStringLiteral("assetCount")).toInt();
+    album.startDate        = obj.value(QStringLiteral("startDate")).toString();
+    album.endDate          = obj.value(QStringLiteral("endDate")).toString();
+    album.thumbnailAssetId = obj.value(QStringLiteral("albumThumbnailAssetId")).toString();
+    return album;
+}
+
+// The asset items of a /search/metadata response document.
+QJsonArray searchItems(const QJsonObject& doc)
+{
+    return doc.value(QStringLiteral("assets")).toObject()
+              .value(QStringLiteral("items")).toArray();
+}
+
+enum class SidecarWrite { Written, Identical, Failed };
+
+// Write a downloaded sidecar only when its bytes differ from
+// what is already on disk: rewriting an identical sidecar would
+// bump the file's time and masquerade as a local metadata edit.
+SidecarWrite writeSidecarIfChanged(const QString& path, const QByteArray& body)
+{
+    QFile existing(path);
+    const QByteArray current = existing.open(QIODevice::ReadOnly)
+                                   ? existing.readAll()
+                                   : QByteArray();
+    existing.close();
+
+    if (current == body)
+    {
+        return SidecarWrite::Identical;
+    }
+
+    QFile file(path);
+
+    if (file.open(QIODevice::WriteOnly) && (file.write(body) == body.size()))
+    {
+        return SidecarWrite::Written;
+    }
+
+    return SidecarWrite::Failed;
+}
+
+} // namespace
+
 class Q_DECL_HIDDEN ImmichTalker::Private
 {
 public:
@@ -61,16 +137,16 @@ public:
     // Download context per reply: asset id and destination path.
     QHash<QNetworkReply*, QPair<QString, QString> > downloadCtx;
 
-    // Album-asset listing accumulates across search pages.
-    QList<ImmichAssetRef> listingAccum;
-    QString               listingAlbumId;
-    QString               listingTagId;
+    // Album/tag asset listings accumulate across search pages.
+    QList<ImmichAssetRef> pagingAccum;
+    QString               pagingAlbumId;
+    QString               pagingTagId;
     // Bumped by every new listing; page replies stamped with an
     // older generation are dropped, so a superseded listing (the
     // user clicked another source mid-listing) cannot leak its
     // assets into the current one.
-    int                   listingGen = 0;
-    QHash<QNetworkReply*, int> listingGenByReply;
+    int                   pagingGen = 0;
+    QHash<QNetworkReply*, int> pagingGenByReply;
     QHash<QNetworkReply*, QString> thumbCtx;
 };
 
@@ -92,78 +168,104 @@ ImmichTalker::~ImmichTalker()
 
 QNetworkRequest ImmichTalker::makeRequest(const QString& path) const
 {
-    QString base = d->session->url();
-    if (base.endsWith(QLatin1Char('/')))
-    {
-        base.chop(1);
-    }
-
-    // The session stores the server root URL, the way every Immich
-    // client expects it entered; the REST API lives below /api.
-    // Without this the requests land on the web frontend, which
-    // answers JSON-only requests with 406.
-
-    if (!base.endsWith(QLatin1String("/api")))
-    {
-        base += QLatin1String("/api");
-    }
-
-    QNetworkRequest req(QUrl(base + path));
+    // The session stores the normalized server root; the REST
+    // API lives below /api. Without this the requests land on
+    // the web frontend, which answers JSON-only requests
+    // with 406.
+    QNetworkRequest req(QUrl(d->session->url() + QStringLiteral("/api") + path));
     req.setRawHeader("x-api-key", d->session->apiKey().toUtf8());
     req.setRawHeader("Accept", "application/json");
     return req;
 }
 
-void ImmichTalker::sendJson(const QString& method, const QString& path, const QByteArray& body)
+QNetworkReply* ImmichTalker::sendGet(const QString& path)
+{
+    return d->net->get(makeRequest(path));
+}
+
+QNetworkReply* ImmichTalker::sendJson(const QString& method, const QString& path,
+                                      const QJsonObject& body)
 {
     QNetworkRequest req = makeRequest(path);
+
+    // The content type is not decoration: without it Qt posts
+    // the body as application/x-www-form-urlencoded, Immich's
+    // JSON body parser never runs, and the fields are missing
+    // when the DTO validates (a 400 against the real server,
+    // first shipped by createAlbum, which set the header in
+    // some copies of this boilerplate and not others).
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
-    QNetworkReply* const reply = d->net->sendCustomRequest(req, method.toUtf8(), body);
-    d->ops.insert(reply, Private::Op::None);
-    Q_EMIT signalBusy(true);
+    return d->net->sendCustomRequest(req, method.toUtf8(), QJsonDocument(body).toJson());
+}
+
+void ImmichTalker::emitReplyError(QNetworkReply* reply)
+{
+    // Qt's errorString() alone ("server replied with status
+    // code 400") discards the explanation Immich sent: the
+    // error body's message field carries it, as a string or
+    // as a list of validation failures. Append it where the
+    // server sent one, so the next rejection explains itself
+    // in the window's status line.
+    QString message = reply->errorString();
+    const QJsonObject body = QJsonDocument::fromJson(reply->readAll()).object();
+    const QJsonValue reason = body.value(QStringLiteral("message"));
+
+    if (reason.isString() && !reason.toString().isEmpty())
+    {
+        message += QStringLiteral(": ") + reason.toString();
+    }
+    else if (reason.isArray())
+    {
+        QStringList reasons;
+        const QJsonArray entries = reason.toArray();
+
+        for (const QJsonValue& entry : entries)
+        {
+            if (entry.isString())
+            {
+                reasons.append(entry.toString());
+            }
+        }
+
+        if (!reasons.isEmpty())
+        {
+            message += QStringLiteral(": ") + reasons.join(QStringLiteral("; "));
+        }
+    }
+
+    Q_EMIT signalError(message);
+}
+
+QJsonObject ImmichTalker::takeSyncReply(QNetworkReply* reply, QString& ctx, int& httpStatus)
+{
+    ctx        = d->syncCtx.take(reply);
+    httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+    reply->deleteLater();
+    return obj;
 }
 
 void ImmichTalker::listAlbums()
 {
-    QNetworkReply* const reply = d->net->get(makeRequest(QStringLiteral("/albums")));
+    QNetworkReply* const reply = sendGet(QStringLiteral("/albums"));
     d->ops.insert(reply, Private::Op::ListAlbums);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::createAlbum(const QString& name)
 {
     const QJsonObject obj { { QStringLiteral("albumName"), name } };
-
-    // The content type is not decoration: without it Qt posts
-    // the body as application/x-www-form-urlencoded, Immich's
-    // JSON body parser never runs, and the (correct) albumName
-    // field is missing when CreateAlbumDto validates: a 400
-    // against the real server. Every other JSON call in this
-    // class sets the header; this one must too.
-    QNetworkRequest req = makeRequest(QStringLiteral("/albums"));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
+    QNetworkReply* const reply = sendJson(QStringLiteral("POST"),
+                                          QStringLiteral("/albums"), obj);
     d->ops.insert(reply, Private::Op::CreateAlbum);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::addToAlbum(const QString& albumId, const QStringList& assetIds)
 {
-    QJsonArray ids;
-    for (const QString& id : assetIds)
-    {
-        ids.append(id);
-    }
-
-    const QJsonObject obj { { QStringLiteral("ids"), ids } };
-    const QByteArray body = QJsonDocument(obj).toJson();
-
-    QNetworkRequest req = makeRequest(QStringLiteral("/albums/%1/assets").arg(albumId));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QNetworkReply* const reply = d->net->put(req, body);
+    const QJsonObject obj { { QStringLiteral("ids"), idsArray(assetIds) } };
+    QNetworkReply* const reply = sendJson(QStringLiteral("PUT"),
+                                          QStringLiteral("/albums/%1/assets").arg(albumId), obj);
     d->ops.insert(reply, Private::Op::AddToAlbum);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::uploadAsset(const QString& filePath, const QString& sidecarPath)
@@ -227,32 +329,30 @@ void ImmichTalker::uploadAsset(const QString& filePath, const QString& sidecarPa
     QNetworkReply* const reply = d->net->post(makeRequest(QStringLiteral("/assets")), multiPart);
     multiPart->setParent(reply);
     d->ops.insert(reply, Private::Op::Upload);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::listTags()
 {
-    QNetworkReply* const reply = d->net->get(makeRequest(QStringLiteral("/tags")));
+    QNetworkReply* const reply = sendGet(QStringLiteral("/tags"));
     d->ops.insert(reply, Private::Op::ListTags);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::listAlbumAssets(const QString& albumId)
 {
-    d->listingAccum.clear();
-    d->listingAlbumId = albumId;
-    d->listingTagId.clear();
-    ++d->listingGen;
-    fetchListingPage(1);
+    d->pagingAccum.clear();
+    d->pagingAlbumId = albumId;
+    d->pagingTagId.clear();
+    ++d->pagingGen;
+    fetchSearchPage(1);
 }
 
 void ImmichTalker::listTagAssets(const QString& tagId)
 {
-    d->listingAccum.clear();
-    d->listingTagId   = tagId;
-    d->listingAlbumId.clear();
-    ++d->listingGen;
-    fetchListingPage(1);
+    d->pagingAccum.clear();
+    d->pagingTagId   = tagId;
+    d->pagingAlbumId.clear();
+    ++d->pagingGen;
+    fetchSearchPage(1);
 }
 
 void ImmichTalker::fetchThumbnail(const QString& assetId)
@@ -260,53 +360,48 @@ void ImmichTalker::fetchThumbnail(const QString& assetId)
     // Pin the small generated size (250px) explicitly: it is
     // what the endpoint defaults to today, and the previews and
     // covers have no use for the 1440px preview size.
-    QNetworkReply* const reply = d->net->get(
-        makeRequest(QStringLiteral("/assets/%1/thumbnail?size=thumbnail").arg(assetId)));
+    QNetworkReply* const reply = sendGet(
+        QStringLiteral("/assets/%1/thumbnail?size=thumbnail").arg(assetId));
     d->ops.insert(reply, Private::Op::Thumbnail);
     d->thumbCtx.insert(reply, assetId);
-    Q_EMIT signalBusy(true);
 }
 
-void ImmichTalker::fetchListingPage(int page)
+void ImmichTalker::fetchSearchPage(int page)
 {
     QJsonObject obj {
         { QStringLiteral("size"), 250 },
         { QStringLiteral("page"), page }
     };
 
-    if (!d->listingTagId.isEmpty())
+    if (!d->pagingTagId.isEmpty())
     {
-        obj.insert(QStringLiteral("tagIds"), QJsonArray { d->listingTagId });
+        obj.insert(QStringLiteral("tagIds"), QJsonArray { d->pagingTagId });
     }
     else
     {
-        obj.insert(QStringLiteral("albumIds"), QJsonArray { d->listingAlbumId });
+        obj.insert(QStringLiteral("albumIds"), QJsonArray { d->pagingAlbumId });
     }
 
-    QNetworkRequest req = makeRequest(QStringLiteral("/search/metadata"));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
+    QNetworkReply* const reply = sendJson(QStringLiteral("POST"),
+                                          QStringLiteral("/search/metadata"), obj);
     d->ops.insert(reply, Private::Op::AlbumAssets);
-    d->listingGenByReply.insert(reply, d->listingGen);
-    Q_EMIT signalBusy(true);
+    d->pagingGenByReply.insert(reply, d->pagingGen);
 }
 
 void ImmichTalker::downloadSidecarOnly(const QString& assetId, const QString& targetPath)
 {
-    QNetworkReply* const reply = d->net->get(
-        makeRequest(QStringLiteral("/assets/%1/sidecar").arg(assetId)));
+    QNetworkReply* const reply = sendGet(
+        QStringLiteral("/assets/%1/sidecar").arg(assetId));
     d->ops.insert(reply, Private::Op::MetaSidecar);
     d->downloadCtx.insert(reply, qMakePair(assetId, targetPath + QStringLiteral(".xmp")));
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::downloadAsset(const QString& assetId, const QString& targetPath)
 {
-    QNetworkReply* const reply = d->net->get(
-        makeRequest(QStringLiteral("/assets/%1/original").arg(assetId)));
+    QNetworkReply* const reply = sendGet(
+        QStringLiteral("/assets/%1/original").arg(assetId));
     d->ops.insert(reply, Private::Op::DownloadOriginal);
     d->downloadCtx.insert(reply, qMakePair(assetId, targetPath));
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::checkUploads(const QMap<QString, QString>& checksumsByPath)
@@ -322,42 +417,34 @@ void ImmichTalker::checkUploads(const QMap<QString, QString>& checksumsByPath)
     }
 
     const QJsonObject obj { { QStringLiteral("assets"), assets } };
-
-    QNetworkRequest req = makeRequest(QStringLiteral("/assets/bulk-upload-check"));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
+    QNetworkReply* const reply = sendJson(QStringLiteral("POST"),
+                                          QStringLiteral("/assets/bulk-upload-check"), obj);
     d->ops.insert(reply, Private::Op::BulkCheck);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::fetchAssetForSync(const QString& assetId)
 {
-    QNetworkReply* const reply = d->net->get(
-        makeRequest(QStringLiteral("/assets/%1").arg(assetId)));
+    QNetworkReply* const reply = sendGet(
+        QStringLiteral("/assets/%1").arg(assetId));
     d->ops.insert(reply, Private::Op::SyncRecord);
     d->syncCtx.insert(reply, assetId);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::updateAsset(const QString& assetId, const QJsonObject& body)
 {
-    QNetworkRequest req = makeRequest(QStringLiteral("/assets/%1").arg(assetId));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QNetworkReply* const reply = d->net->put(req, QJsonDocument(body).toJson());
+    QNetworkReply* const reply = sendJson(QStringLiteral("PUT"),
+                                          QStringLiteral("/assets/%1").arg(assetId), body);
     d->ops.insert(reply, Private::Op::PatchAsset);
     d->syncCtx.insert(reply, assetId);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::createTag(const QString& name)
 {
     const QJsonObject obj { { QStringLiteral("name"), name } };
-    QNetworkRequest req = makeRequest(QStringLiteral("/tags"));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
+    QNetworkReply* const reply = sendJson(QStringLiteral("POST"),
+                                          QStringLiteral("/tags"), obj);
     d->ops.insert(reply, Private::Op::CreateTag);
     d->syncCtx.insert(reply, name);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::searchByFileName(const QString& name, const QString& albumId)
@@ -371,91 +458,60 @@ void ImmichTalker::searchByFileName(const QString& name, const QString& albumId)
     {
         obj.insert(QStringLiteral("albumIds"), QJsonArray { albumId });
     }
-    QNetworkRequest req = makeRequest(QStringLiteral("/search/metadata"));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
+
+    QNetworkReply* const reply = sendJson(QStringLiteral("POST"),
+                                          QStringLiteral("/search/metadata"), obj);
     d->ops.insert(reply, Private::Op::SearchByName);
     d->syncCtx.insert(reply, name);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::listAlbumsForAsset(const QString& assetId)
 {
-    QNetworkReply* const reply = d->net->get(
-        makeRequest(QStringLiteral("/albums?assetId=%1").arg(assetId)));
+    QNetworkReply* const reply = sendGet(
+        QStringLiteral("/albums?assetId=%1").arg(assetId));
     d->ops.insert(reply, Private::Op::AlbumsForAsset);
     d->syncCtx.insert(reply, assetId);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::createStack(const QStringList& assetIds)
 {
-    QJsonArray ids;
-
-    for (const QString& id : assetIds)
-    {
-        ids.append(id);
-    }
-
-    const QJsonObject obj { { QStringLiteral("assetIds"), ids } };
-    QNetworkRequest req = makeRequest(QStringLiteral("/stacks"));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QNetworkReply* const reply = d->net->post(req, QJsonDocument(obj).toJson());
+    const QJsonObject obj { { QStringLiteral("assetIds"), idsArray(assetIds) } };
+    QNetworkReply* const reply = sendJson(QStringLiteral("POST"),
+                                          QStringLiteral("/stacks"), obj);
     d->ops.insert(reply, Private::Op::CreateStack);
     d->syncCtx.insert(reply, assetIds.value(0));
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::fetchStack(const QString& stackId)
 {
-    QNetworkReply* const reply = d->net->get(
-        makeRequest(QStringLiteral("/stacks/%1").arg(stackId)));
+    QNetworkReply* const reply = sendGet(
+        QStringLiteral("/stacks/%1").arg(stackId));
     d->ops.insert(reply, Private::Op::FetchStack);
     d->syncCtx.insert(reply, stackId);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::deleteAssets(const QStringList& assetIds)
 {
-    QJsonArray ids;
-
-    for (const QString& id : assetIds)
-    {
-        ids.append(id);
-    }
-
-    const QJsonObject obj { { QStringLiteral("ids"), ids } };
-    QNetworkRequest req = makeRequest(QStringLiteral("/assets"));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QNetworkReply* const reply = d->net->sendCustomRequest(req, QByteArrayLiteral("DELETE"),
-                                                            QJsonDocument(obj).toJson());
+    const QJsonObject obj { { QStringLiteral("ids"), idsArray(assetIds) } };
+    QNetworkReply* const reply = sendJson(QStringLiteral("DELETE"),
+                                          QStringLiteral("/assets"), obj);
     d->ops.insert(reply, Private::Op::DeleteAssets);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::bulkTagAssets(const QString& tagId, const QStringList& assetIds)
 {
-    QJsonArray ids;
-
-    for (const QString& id : assetIds)
-    {
-        ids.append(id);
-    }
-
     // TagBulkAssetsDto in 3.3.3: tagIds is an array too (a
     // single "tagId" field is rejected with a 400, verified
     // against the live server).
     const QJsonObject obj {
         { QStringLiteral("tagIds"),   QJsonArray { tagId } },
-        { QStringLiteral("assetIds"), ids   }
+        { QStringLiteral("assetIds"), idsArray(assetIds)   }
     };
 
-    QNetworkRequest req = makeRequest(QStringLiteral("/tags/assets"));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QNetworkReply* const reply = d->net->put(req, QJsonDocument(obj).toJson());
+    QNetworkReply* const reply = sendJson(QStringLiteral("PUT"),
+                                          QStringLiteral("/tags/assets"), obj);
     d->ops.insert(reply, Private::Op::BulkTagAssets);
     d->syncCtx.insert(reply, tagId);
-    Q_EMIT signalBusy(true);
 }
 
 void ImmichTalker::cancel()
@@ -478,7 +534,6 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
     // apart from the per-case sync contexts below, which hold
     // a single id: the two shared the name ctx until now.
     const QPair<QString, QString> dlCtx = d->downloadCtx.take(reply);
-    Q_EMIT signalBusy(false);
 
     if (op == Private::Op::DownloadOriginal || op == Private::Op::DownloadSidecar
         || op == Private::Op::MetaSidecar)
@@ -502,45 +557,28 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
                 return;
             }
 
-            bool sidecarWritten = false;
-
             if (httpStatus == 200 && !body.isEmpty())
             {
-                // Do not rewrite an identical sidecar: the write
-                // would bump the file's time and masquerade as a
-                // local metadata edit.
-                QFile existing(targetPath);
-                const QByteArray current = existing.open(QIODevice::ReadOnly)
-                                               ? existing.readAll()
-                                               : QByteArray();
-                existing.close();
+                const SidecarWrite result = writeSidecarIfChanged(targetPath, body);
 
-                if (current == body)
+                if (result == SidecarWrite::Written)
+                {
+                    Q_EMIT signalMetaFinished(assetId, true);
+                    return;
+                }
+
+                if (result == SidecarWrite::Identical)
                 {
                     Q_EMIT signalMetaFinished(assetId, false);
                     return;
                 }
-
-                QFile file(targetPath);
-
-                if (file.open(QIODevice::WriteOnly))
-                {
-                    sidecarWritten = (file.write(body) == body.size());
-                }
-            }
-
-            if (sidecarWritten)
-            {
-                Q_EMIT signalMetaFinished(assetId, true);
-                return;
             }
 
             const QString originalPath = targetPath.left(targetPath.size() - 4);   // strip ".xmp"
-            QNetworkReply* const recordReply = d->net->get(
-                makeRequest(QStringLiteral("/assets/%1").arg(assetId)));
+            QNetworkReply* const recordReply = sendGet(
+                QStringLiteral("/assets/%1").arg(assetId));
             d->ops.insert(recordReply, Private::Op::MetaRecord);
             d->downloadCtx.insert(recordReply, qMakePair(assetId, originalPath));
-            Q_EMIT signalBusy(true);
             return;
         }
 
@@ -549,31 +587,8 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
             // The original is already on disk; a missing (404) or
             // unfetchable sidecar does not fail the download. An
             // identical local sidecar is left untouched.
-            bool sidecarWritten = false;
-
-            if (!failed && httpStatus == 200 && !body.isEmpty())
-            {
-                QFile existing(targetPath);
-                const QByteArray current = existing.open(QIODevice::ReadOnly)
-                                               ? existing.readAll()
-                                               : QByteArray();
-                existing.close();
-
-                if (current == body)
-                {
-                    Q_EMIT signalDownloadFinished(assetId, true);
-                    return;
-                }
-
-                QFile file(targetPath);
-
-                if (file.open(QIODevice::WriteOnly))
-                {
-                    sidecarWritten = (file.write(body) == body.size());
-                }
-            }
-
-            if (sidecarWritten)
+            if (!failed && httpStatus == 200 && !body.isEmpty()
+                && writeSidecarIfChanged(targetPath, body) != SidecarWrite::Failed)
             {
                 Q_EMIT signalDownloadFinished(assetId, true);
                 return;
@@ -583,11 +598,10 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
             // can generate a sidecar from the Immich metadata (the
             // tags above all) instead of the photo arriving bare.
             const QString originalPath = targetPath.left(targetPath.size() - 4);   // strip ".xmp"
-            QNetworkReply* const recordReply = d->net->get(
-                makeRequest(QStringLiteral("/assets/%1").arg(assetId)));
+            QNetworkReply* const recordReply = sendGet(
+                QStringLiteral("/assets/%1").arg(assetId));
             d->ops.insert(recordReply, Private::Op::DownloadRecord);
             d->downloadCtx.insert(recordReply, qMakePair(assetId, originalPath));
-            Q_EMIT signalBusy(true);
             return;
         }
 
@@ -613,11 +627,10 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         }
 
         // Chain the sidecar fetch for the asset just written.
-        QNetworkReply* const sidecarReply = d->net->get(
-            makeRequest(QStringLiteral("/assets/%1/sidecar").arg(assetId)));
+        QNetworkReply* const sidecarReply = sendGet(
+            QStringLiteral("/assets/%1/sidecar").arg(assetId));
         d->ops.insert(sidecarReply, Private::Op::DownloadSidecar);
         d->downloadCtx.insert(sidecarReply, qMakePair(assetId, targetPath + QStringLiteral(".xmp")));
-        Q_EMIT signalBusy(true);
         return;
     }
 
@@ -633,56 +646,59 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
     if (op == Private::Op::CreateStack)
     {
-        const QString     ctx        = d->syncCtx.take(reply);
-        const int         httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QJsonObject obj        = QJsonDocument::fromJson(reply->readAll()).object();
-        reply->deleteLater();
+        QString ctx;
+        int     httpStatus = 0;
+        const QJsonObject obj = takeSyncReply(reply, ctx, httpStatus);
         Q_EMIT signalStackCreated(ctx, obj.value(QStringLiteral("id")).toString(), httpStatus);
         return;
     }
 
     if (op == Private::Op::FetchStack)
     {
-        const QString     ctx        = d->syncCtx.take(reply);
-        const int         httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QJsonObject obj        = QJsonDocument::fromJson(reply->readAll()).object();
-        const QJsonArray  assets     = obj.value(QStringLiteral("assets")).toArray();
-        QStringList       memberIds;
-
-        for (const QJsonValue& v : assets)
-        {
-            memberIds.append(v.toObject().value(QStringLiteral("id")).toString());
-        }
-
-        reply->deleteLater();
-        Q_EMIT signalStackFetched(ctx, memberIds, httpStatus);
+        QString ctx;
+        int     httpStatus = 0;
+        const QJsonObject obj = takeSyncReply(reply, ctx, httpStatus);
+        Q_EMIT signalStackFetched(ctx, idsFromArray(obj.value(QStringLiteral("assets")).toArray()),
+                                  httpStatus);
         return;
     }
 
     if (op == Private::Op::SearchByName)
     {
-        const QString     ctx   = d->syncCtx.take(reply);
-        const QJsonObject doc   = QJsonDocument::fromJson(reply->readAll()).object();
-        const QJsonArray  items = doc.value(QStringLiteral("assets"))
-                                     .toObject().value(QStringLiteral("items")).toArray();
-        reply->deleteLater();
-        Q_EMIT signalIdentitySearch(ctx, items);
+        // A failed search is reported like any other failed
+        // request; the window's error handling completes the
+        // identity step it was waiting for. Emitting an empty
+        // result instead would read as "no such photo", which
+        // sends the file down the wrong path.
+        if (reply->error() != QNetworkReply::NoError)
+        {
+            d->syncCtx.take(reply);
+            emitReplyError(reply);
+            reply->deleteLater();
+            return;
+        }
+
+        QString ctx;
+        int     httpStatus = 0;
+        const QJsonObject obj = takeSyncReply(reply, ctx, httpStatus);
+        Q_EMIT signalIdentitySearch(ctx, searchItems(obj));
         return;
     }
 
     if (op == Private::Op::AlbumsForAsset)
     {
-        const QString    ctx = d->syncCtx.take(reply);
-        const QJsonArray arr = QJsonDocument::fromJson(reply->readAll()).array();
-        QStringList      albumIds;
-
-        for (const QJsonValue& v : arr)
+        if (reply->error() != QNetworkReply::NoError)
         {
-            albumIds.append(v.toObject().value(QStringLiteral("id")).toString());
+            d->syncCtx.take(reply);
+            emitReplyError(reply);
+            reply->deleteLater();
+            return;
         }
 
+        const QString    ctx = d->syncCtx.take(reply);
+        const QJsonArray arr = QJsonDocument::fromJson(reply->readAll()).array();
         reply->deleteLater();
-        Q_EMIT signalAlbumsForAsset(ctx, albumIds);
+        Q_EMIT signalAlbumsForAsset(ctx, idsFromArray(arr));
         return;
     }
 
@@ -700,10 +716,9 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         // The sync flow wants the HTTP status itself (a 403 is
         // information, not a generic error), so these replies
         // bypass the shared error branch below.
-        const QString ctx        = d->syncCtx.take(reply);
-        const int     httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QJsonObject obj    = QJsonDocument::fromJson(reply->readAll()).object();
-        reply->deleteLater();
+        QString ctx;
+        int     httpStatus = 0;
+        const QJsonObject obj = takeSyncReply(reply, ctx, httpStatus);
 
         switch (op)
         {
@@ -726,42 +741,38 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
         return;
     }
 
-    if (op == Private::Op::MetaRecord)
-    {
-        const QJsonObject record = (reply->error() == QNetworkReply::NoError)
-                                       ? QJsonDocument::fromJson(reply->readAll()).object()
-                                       : QJsonObject();
-        reply->deleteLater();
-
-        if (!record.isEmpty())
-        {
-            Q_EMIT signalMetaRecord(dlCtx.first, dlCtx.second, record);
-        }
-        else
-        {
-            Q_EMIT signalMetaFinished(dlCtx.first, false);
-        }
-
-        return;
-    }
-
-    if (op == Private::Op::DownloadRecord)
+    if (op == Private::Op::MetaRecord || op == Private::Op::DownloadRecord)
     {
         // A record that cannot be fetched still leaves a good
-        // download behind: finish without a generated sidecar rather
-        // than raising an error.
+        // download behind: the meta refresh finishes unchanged,
+        // the download finishes without a generated sidecar,
+        // rather than either raising an error.
         const QJsonObject record = (reply->error() == QNetworkReply::NoError)
                                        ? QJsonDocument::fromJson(reply->readAll()).object()
                                        : QJsonObject();
         reply->deleteLater();
 
-        if (!record.isEmpty())
+        if (op == Private::Op::MetaRecord)
         {
-            Q_EMIT signalAssetRecord(dlCtx.first, dlCtx.second, record);
+            if (!record.isEmpty())
+            {
+                Q_EMIT signalMetaRecord(dlCtx.first, dlCtx.second, record);
+            }
+            else
+            {
+                Q_EMIT signalMetaFinished(dlCtx.first, false);
+            }
         }
         else
         {
-            Q_EMIT signalDownloadFinished(dlCtx.first, true);
+            if (!record.isEmpty())
+            {
+                Q_EMIT signalAssetRecord(dlCtx.first, dlCtx.second, record);
+            }
+            else
+            {
+                Q_EMIT signalDownloadFinished(dlCtx.first, true);
+            }
         }
 
         return;
@@ -769,40 +780,7 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
     if (reply->error() != QNetworkReply::NoError)
     {
-        // Qt's errorString() alone ("server replied with status
-        // code 400") discards the explanation Immich sent: the
-        // error body's message field carries it, as a string or
-        // as a list of validation failures. Append it where the
-        // server sent one, so the next rejection explains
-        // itself in the window's status line.
-        QString message = reply->errorString();
-        const QJsonObject body = QJsonDocument::fromJson(reply->readAll()).object();
-        const QJsonValue reason = body.value(QStringLiteral("message"));
-
-        if (reason.isString() && !reason.toString().isEmpty())
-        {
-            message += QStringLiteral(": ") + reason.toString();
-        }
-        else if (reason.isArray())
-        {
-            QStringList reasons;
-            const QJsonArray entries = reason.toArray();
-
-            for (const QJsonValue& entry : entries)
-            {
-                if (entry.isString())
-                {
-                    reasons.append(entry.toString());
-                }
-            }
-
-            if (!reasons.isEmpty())
-            {
-                message += QStringLiteral(": ") + reasons.join(QStringLiteral("; "));
-            }
-        }
-
-        Q_EMIT signalError(message);
+        emitReplyError(reply);
         reply->deleteLater();
         return;
     }
@@ -819,27 +797,16 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
             for (const QJsonValue& val : items)
             {
-                const QJsonObject obj = val.toObject();
-                ImmichAlbum album;
-                album.id               = obj.value(QStringLiteral("id")).toString();
-                album.name             = obj.value(QStringLiteral("albumName")).toString();
-                album.assetCount       = obj.value(QStringLiteral("assetCount")).toInt();
-                album.startDate        = obj.value(QStringLiteral("startDate")).toString();
-                album.endDate          = obj.value(QStringLiteral("endDate")).toString();
-                album.thumbnailAssetId = obj.value(QStringLiteral("albumThumbnailAssetId")).toString();
-                albums.append(album);
+                albums.append(albumFromJson(val.toObject()));
             }
+
             Q_EMIT signalAlbums(albums);
             break;
         }
 
         case Private::Op::CreateAlbum:
         {
-            const QJsonObject obj = doc.object();
-            ImmichAlbum album;
-            album.id   = obj.value(QStringLiteral("id")).toString();
-            album.name = obj.value(QStringLiteral("albumName")).toString();
-            Q_EMIT signalAlbumCreated(album);
+            Q_EMIT signalAlbumCreated(albumFromJson(doc.object()));
             break;
         }
 
@@ -877,11 +844,6 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
                 tag.id   = obj.value(QStringLiteral("id")).toString();
                 tag.name = obj.value(QStringLiteral("value")).toString();
 
-                if (tag.name.isEmpty())
-                {
-                    tag.name = obj.value(QStringLiteral("name")).toString();
-                }
-
                 if (!tag.id.isEmpty() && !tag.name.isEmpty())
                 {
                     tags.append(tag);
@@ -902,7 +864,7 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
         case Private::Op::AlbumAssets:
         {
-            if (d->listingGenByReply.take(reply) != d->listingGen)
+            if (d->pagingGenByReply.take(reply) != d->pagingGen)
             {
                 // A page from a superseded listing: drop it and let
                 // its pagination chain die here.
@@ -910,7 +872,7 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
             }
 
             const QJsonObject assetsObj = doc.object().value(QStringLiteral("assets")).toObject();
-            const QJsonArray items = assetsObj.value(QStringLiteral("items")).toArray();
+            const QJsonArray items = searchItems(doc.object());
 
             for (const QJsonValue& val : items)
             {
@@ -919,7 +881,7 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
                 asset.id            = obj.value(QStringLiteral("id")).toString();
                 asset.fileName      = obj.value(QStringLiteral("originalFileName")).toString();
                 asset.fileCreatedAt = obj.value(QStringLiteral("fileCreatedAt")).toString();
-                d->listingAccum.append(asset);
+                d->pagingAccum.append(asset);
             }
 
             // Follow the search pagination until the server stops
@@ -928,12 +890,12 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
 
             if (!nextPage.isEmpty())
             {
-                fetchListingPage(nextPage.toInt());
+                fetchSearchPage(nextPage.toInt());
                 break;
             }
 
-            const QList<ImmichAssetRef> assets = d->listingAccum;
-            d->listingAccum.clear();
+            const QList<ImmichAssetRef> assets = d->pagingAccum;
+            d->pagingAccum.clear();
             Q_EMIT signalAlbumAssets(assets);
             break;
         }
@@ -962,14 +924,9 @@ void ImmichTalker::slotFinished(QNetworkReply* reply)
             break;
         }
 
-        case Private::Op::DownloadOriginal:
-        case Private::Op::DownloadSidecar:
-        case Private::Op::None:
-            break;
-
         default:
             // Every other op returned earlier (downloads,
-            // records) or in the sync-family switch above.
+            // records, the sync family) or has no parse step.
             break;
     }
 }
