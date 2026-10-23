@@ -337,7 +337,7 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     auto* const content = new QWidget;
     auto* const layout  = new QVBoxLayout(content);
 
-    // Banner with the Immich logo on top of the dialog, linking to
+    // The Immich logo beside the connection settings, linking to
     // the Immich web site, as in the other web-service tools.
 
     auto* const logo = new QLabel;
@@ -362,19 +362,23 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
                   .arg(QString::fromLatin1("<img src=\"data:image/png;base64,%1\">")
                        .arg(QLatin1String(logoData.toBase64().data()))));
 
-    auto* const logoRow = new QHBoxLayout;
-    logoRow->addWidget(logo);
-    logoRow->addStretch();
-    layout->addLayout(logoRow);
-
-    layout->addLayout(form);
-
     // The settings action sits with the settings it belongs to,
     // at natural width, instead of stretching across the dialog.
     auto* const settingsBtnRow = new QHBoxLayout;
     settingsBtnRow->addWidget(d->connectBtn);
     settingsBtnRow->addStretch();
-    layout->addLayout(settingsBtnRow);
+
+    // The logo shares the connection block's height instead of
+    // taking a banner row of its own: logo on the left, the
+    // server settings and the Connect button stacked beside it.
+    auto* const headerSide = new QVBoxLayout;
+    headerSide->addLayout(form);
+    headerSide->addLayout(settingsBtnRow);
+
+    auto* const headerRow = new QHBoxLayout;
+    headerRow->addWidget(logo, 0, Qt::AlignTop);
+    headerRow->addLayout(headerSide, 1);
+    layout->addLayout(headerRow);
 
     // A rule between the server settings and the working view,
     // with air around it: the hairline alone, wedged directly
