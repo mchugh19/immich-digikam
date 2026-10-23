@@ -115,7 +115,7 @@ inline QString buildSidecarPacket(const QStringList& tags, int rating,
 // because digiKam's database fields were generated on top. The
 // generated values win for the properties in generatedKeys.
 // Namespace declarations found on the base packet's ancestors
-// are re-declared on the generated description so preserved
+// are redeclared on the generated description so preserved
 // elements keep their prefixes.
 inline QString mergeSidecarPackets(const QString& generated,
                                    const QString& base,
