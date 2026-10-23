@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <QBuffer>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -36,6 +37,7 @@
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
+#include <QImage>
 #include <QImageReader>
 #include <QPixmap>
 #include <QShowEvent>
@@ -334,6 +336,37 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     // it.
     auto* const content = new QWidget;
     auto* const layout  = new QVBoxLayout(content);
+
+    // Banner with the Immich logo on top of the dialog, linking to
+    // the Immich web site, as in the other web-service tools.
+
+    auto* const logo = new QLabel;
+    logo->setContentsMargins(QMargins());
+    logo->setScaledContents(false);
+    logo->setOpenExternalLinks(true);
+    logo->setTextFormat(Qt::RichText);
+    logo->setFocusPolicy(Qt::NoFocus);
+    logo->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    logo->setSizePolicy(QSizePolicy(QSizePolicy::Minimum, QSizePolicy::Minimum));
+    logo->setToolTip(i18n("Visit Immich website"));
+    logo->setAlignment(Qt::AlignLeft);
+
+    const QImage logoImg = QImage(QStandardPaths::locate(QStandardPaths::GenericDataLocation,
+                                                         QLatin1String("digikam/data/logo-immich.webp")));
+
+    QByteArray logoData;
+    QBuffer    logoBuffer(&logoData);
+    logoImg.save(&logoBuffer, "PNG");
+    logo->setText(QString::fromLatin1("<a href=\"%1\">%2</a>")
+                  .arg(QLatin1String("https://immich.app"))
+                  .arg(QString::fromLatin1("<img src=\"data:image/png;base64,%1\">")
+                       .arg(QLatin1String(logoData.toBase64().data()))));
+
+    auto* const logoRow = new QHBoxLayout;
+    logoRow->addWidget(logo);
+    logoRow->addStretch();
+    layout->addLayout(logoRow);
+
     layout->addLayout(form);
 
     // The settings action sits with the settings it belongs to,
