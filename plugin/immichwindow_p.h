@@ -159,12 +159,13 @@ public:
     QList<QUrl>  pending;
     QStringList  uploadedIds;
     QString      targetAlbumId;
-    QString      tempSidecar;
+    QStringList  tempSidecars;
     int          total       = 0;
     int          done        = 0;
     int          failed      = 0;
     int          alreadyThere = 0;
     int          selectionDuplicates = 0;
+    int          uploadedCount = 0;
     bool         uploading   = false;
     bool         checking    = false;
     bool         cancelling  = false;
@@ -269,7 +270,6 @@ public:
     QByteArray   identityThumbBytes;
     bool         identityWaitingLocal = false;
     int          identityPass = 1;      // 1 = target-album scope, 2 = library
-    bool         identityNameSeen = false;
     bool         identitySearching = false;
     int          matchedSync   = 0;
     int          matchedMulti  = 0;

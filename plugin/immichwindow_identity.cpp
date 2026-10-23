@@ -70,6 +70,12 @@
 namespace DigikamGenericImmichPlugin
 {
 
+void ImmichWindow::markReplace(const QString& path)
+{
+    d->replaceOldByPath.insert(path, d->identityCandidateId);
+    d->replaceStackByPath.insert(path, d->identityStackId);
+}
+
 void ImmichWindow::nextIdentity()
 {
     if (d->cancelling || !d->uploading)
@@ -84,17 +90,17 @@ void ImmichWindow::nextIdentity()
     }
 
     d->identityUrl = d->identityQueue.takeFirst();
-    const QString path = d->identityUrl.toLocalFile();
+    const QString path     = d->identityUrl.toLocalFile();
+    const QString fileName = QFileInfo(path).fileName();
     d->status->setText(i18n("Checking for an existing copy of %1...")
-                           .arg(QFileInfo(path).fileName()));
+                           .arg(fileName));
 
     // Pass 1 scopes the search to the album being exported to:
     // within an album, the file name is the primary key. Only a
     // complete miss there earns a library-wide second pass.
     d->identityPass     = 1;
-    d->identityNameSeen = false;
     d->identitySearching = true;
-    d->talker->searchByFileName(QFileInfo(path).fileName(), d->targetAlbumId);
+    d->talker->searchByFileName(fileName, d->targetAlbumId);
 }
 
 void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray& items)
@@ -108,6 +114,7 @@ void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray&
 
     const QUrl    url  = d->identityUrl;
     const QString path = url.toLocalFile();
+    const QString fileName = QFileInfo(path).fileName();
     QList<IdentityCandidate> candidates;
 
     for (const QJsonValue& v : items)
@@ -123,11 +130,6 @@ void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray&
         c.width         = o.value(QStringLiteral("width")).toInt();
         c.height        = o.value(QStringLiteral("height")).toInt();
         candidates.append(c);
-
-        if (c.name == QFileInfo(path).fileName())
-        {
-            d->identityNameSeen = true;
-        }
     }
 
     QString dateStr;
@@ -142,12 +144,12 @@ void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray&
         height  = item.dimensions().height();
     }
 
-    const IdentityMatch match = chooseIdentityMatch(candidates, QFileInfo(path).fileName(),
+    const IdentityMatch match = chooseIdentityMatch(candidates, fileName,
                                                     dateStr, width, height);
 
     if (match.assetId.isEmpty())
     {
-        if (d->identityPass == 1 && !d->targetAlbumId.isEmpty() && !d->identityNameSeen)
+        if (d->identityPass == 1 && !d->targetAlbumId.isEmpty() && !match.nameSeen)
         {
             // The target album holds nothing with this name at
             // all: the photo may live in another album (moved
@@ -155,7 +157,7 @@ void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray&
             // treating the file as new.
             d->identityPass = 2;
             d->identitySearching = true;
-            d->talker->searchByFileName(QFileInfo(path).fileName());
+            d->talker->searchByFileName(fileName);
             return;
         }
 
@@ -230,8 +232,7 @@ void ImmichWindow::finishIdentityCheck(const QImage& localImage, const QByteArra
         if (!localImage.isNull() && !remoteImage.isNull()
             && imageContains(remoteImage, localImage))
         {
-            d->replaceOldByPath.insert(path, d->identityCandidateId);
-            d->replaceStackByPath.insert(path, d->identityStackId);
+            markReplace(path);
         }
 
         d->pending.append(url);
@@ -251,21 +252,12 @@ void ImmichWindow::finishIdentityCheck(const QImage& localImage, const QByteArra
         // earlier file in this selection already claimed counts
         // as a duplicate within the selection, not as another
         // asset found.
-        if (d->uploadedIds.contains(d->identityCandidateId))
+        if (claimAssetId(d->identityCandidateId))
         {
-            ++d->selectionDuplicates;
-        }
-        else
-        {
-            d->uploadedIds.append(d->identityCandidateId);
             ++d->alreadyThere;
         }
 
-        Private::SyncJob job;
-        job.assetId   = d->identityCandidateId;
-        job.localPath = path;
-        job.dk        = dkFieldsFor(url);
-        d->syncJobs.append(job);
+        queueSyncJob(d->identityCandidateId, path, dkFieldsFor(url));
         ++d->matchedSync;
         ++d->done;
         d->progress->setValue(d->done);
@@ -277,8 +269,7 @@ void ImmichWindow::finishIdentityCheck(const QImage& localImage, const QByteArra
     {
         // A real edit of a photo the server holds: upload it and
         // replace the old copy once the upload lands.
-        d->replaceOldByPath.insert(path, d->identityCandidateId);
-        d->replaceStackByPath.insert(path, d->identityStackId);
+        markReplace(path);
     }
 
     d->pending.append(url);

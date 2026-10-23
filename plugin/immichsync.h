@@ -317,6 +317,7 @@ public:
     QString assetId;
     QString stackId;           // stackId of the chosen candidate
     int     candidates  = 0;   // name+dimension matches found
+    bool    nameSeen    = false;   // any candidate carried the name at all
     bool    strictTime  = false;
     // The match rests on name + exact capture time alone
     // (dimensions differ: the photo was cropped or resized).
@@ -339,6 +340,8 @@ inline IdentityMatch chooseIdentityMatch(const QList<IdentityCandidate>& candida
         {
             continue;
         }
+
+        result.nameSeen = true;
 
         const bool dims = (c.width == width && c.height == height)
                        || (c.width == height && c.height == width);

@@ -98,6 +98,7 @@ void ImmichWindow::slotUploadSelection()
     d->failed      = 0;
     d->alreadyThere = 0;
     d->selectionDuplicates = 0;
+    d->uploadedCount = 0;
     d->uploading   = true;
 
     d->syncJobs.clear();
@@ -123,7 +124,6 @@ void ImmichWindow::slotUploadSelection()
     d->identityDimsDiffer = false;
     d->identityWaitingThumb = false;
     d->identityPass = 1;
-    d->identityNameSeen = false;
     d->identitySearching = false;
     d->matchedSync   = 0;
     d->matchedMulti  = 0;
@@ -203,21 +203,12 @@ void ImmichWindow::slotUploadCheck(const QMap<QString, QString>& duplicatesByPat
             // that runs after the uploads: the file itself is not
             // re-sent, but changed tags, rating, caption and GPS
             // still reach the server through the API.
-            if (d->uploadedIds.contains(assetId))
+            if (claimAssetId(assetId))
             {
-                ++d->selectionDuplicates;
-            }
-            else
-            {
-                d->uploadedIds.append(assetId);
                 ++d->alreadyThere;
             }
 
-            Private::SyncJob job;
-            job.assetId   = assetId;
-            job.localPath = url.toLocalFile();
-            job.dk        = dkFieldsFor(url);
-            d->syncJobs.append(job);
+            queueSyncJob(assetId, url.toLocalFile(), dkFieldsFor(url));
             ++d->done;
         }
     }
@@ -260,7 +251,7 @@ void ImmichWindow::nextUpload()
     d->currentUploadFields = dkFieldsFor(url);
     d->haveUploadFields    = true;
     d->currentUploadPath   = path;
-    d->talker->uploadAsset(path, sidecarFor(url, path));
+    d->talker->uploadAsset(path, sidecarFor(d->currentUploadFields, path));
 }
 
 void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*status*/)
@@ -280,14 +271,11 @@ void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*
     // can still be assigned to the target album. But an asset an
     // earlier file in this selection already claimed is a
     // duplicate within the selection, counted as such instead of
-    // being queued for the album a second time.
-    if (!assetId.isEmpty() && d->uploadedIds.contains(assetId))
+    // being queued for the album a second time; only a fresh
+    // claim counts as an upload here.
+    if (claimAssetId(assetId))
     {
-        ++d->selectionDuplicates;
-    }
-    else
-    {
-        d->uploadedIds.append(assetId);
+        ++d->uploadedCount;
     }
 
     if (d->haveUploadFields && !assetId.isEmpty())
@@ -316,11 +304,7 @@ void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*
         ctx.stackId   = d->replaceStackByPath.take(d->currentUploadPath);
         d->replaces.append(ctx);
 
-        Private::SyncJob job;
-        job.assetId   = assetId;
-        job.localPath = d->currentUploadPath;
-        job.dk        = d->currentUploadFields;
-        d->syncJobs.append(job);
+        queueSyncJob(assetId, d->currentUploadPath, d->currentUploadFields);
     }
 
     ++d->done;
@@ -335,11 +319,12 @@ void ImmichWindow::finishUpload()
     d->cancelBtn->setEnabled(false);
 
 
-    if (!d->tempSidecar.isEmpty())
+    for (const QString& tempPath : std::as_const(d->tempSidecars))
     {
-        QFile::remove(d->tempSidecar);
-        d->tempSidecar.clear();
+        QFile::remove(tempPath);
     }
+
+    d->tempSidecars.clear();
 
     if (d->cancelling)
     {
@@ -389,10 +374,7 @@ void ImmichWindow::printUploadSummary()
     // counts, so reporting each separately produced a paragraph
     // that contradicted itself; here every outcome is counted
     // once, in the order it happened.
-    const int uploaded = qMax(0, d->done - d->failed - d->alreadyThere
-                                 - d->selectionDuplicates);
-
-    QString uploadedPart = i18n("%1 uploaded").arg(uploaded);
+    QString uploadedPart = i18n("%1 uploaded").arg(d->uploadedCount);
 
     if (d->stackedCount > 0 || d->overwriteCount > 0 || d->trashFallbackCount > 0)
     {
@@ -508,7 +490,42 @@ SyncFields ImmichWindow::dkFieldsFor(const QUrl& url) const
     return fields;
 }
 
-QString ImmichWindow::sidecarFor(const QUrl& url, const QString& filePath)
+bool ImmichWindow::claimAssetId(const QString& assetId)
+{
+    if (d->uploadedIds.contains(assetId))
+    {
+        ++d->selectionDuplicates;
+        return false;
+    }
+
+    d->uploadedIds.append(assetId);
+    return true;
+}
+
+void ImmichWindow::queueSyncJob(const QString& assetId, const QString& localPath,
+                                const SyncFields& dk)
+{
+    Private::SyncJob job;
+    job.assetId   = assetId;
+    job.localPath = localPath;
+    job.dk        = dk;
+    d->syncJobs.append(job);
+}
+
+QString ImmichWindow::writeTempSidecar(const QString& tempPath, const QString& packet)
+{
+    QFile file(tempPath);
+
+    if (file.open(QIODevice::WriteOnly) && file.write(packet.toUtf8()) == packet.toUtf8().size())
+    {
+        d->tempSidecars.append(tempPath);
+        return tempPath;
+    }
+
+    return QString();
+}
+
+QString ImmichWindow::sidecarFor(const SyncFields& fields, const QString& filePath)
 {
     const QFileInfo info(filePath);
 
@@ -558,65 +575,59 @@ QString ImmichWindow::sidecarFor(const QUrl& url, const QString& filePath)
     // 1. digiKam's database is the user's current intent: this
     //    tool runs inside digiKam on digiKam's selection, and an
     //    export should carry the tags and rating as they stand in
-    //    digiKam now. Generate the sidecar from the item info, in
-    //    the packet shape the bridge contract verified against a
-    //    live server, merged over the base packet so any other
-    //    XMP the file carries (digiKam's label properties, say)
-    //    is preserved rather than dropped. (An on-disk sidecar
-    //    used to win outright; a stale fixture-era .xmp next to
-    //    a test photo then silently overrode fresh digiKam edits,
-    //    exporting a rating and tags the user had changed.)
-    if (d->iface)
+    //    digiKam now. Generate the sidecar from the item's fields
+    //    (dkFieldsFor already mapped digiKam's sentinels: an
+    //    unset rating is 0 here, never the -1 Immich would read
+    //    as "rejected"), in the packet shape the bridge contract
+    //    verified against a live server, merged over the base
+    //    packet so any other XMP the file carries (digiKam's
+    //    label properties, say) is preserved rather than
+    //    dropped. (An on-disk sidecar used to win outright; a
+    //    stale fixture-era .xmp next to a test photo then
+    //    silently overrode fresh digiKam edits, exporting a
+    //    rating and tags the user had changed.)
+    const QStringList& tags    = fields.tags;
+    const int          rating  = fields.rating;
+    const QString&     comment = fields.description;
+    const bool         hasGps  = fields.hasGps;
+
+    if (!tags.isEmpty() || rating > 0 || !comment.isEmpty() || hasGps)
     {
-        const DItemInfo item(d->iface->itemInfo(url));
-        const QStringList tags    = item.tagsPath();
-        // digiKam reports an unset rating as -1; passing that
-        // through would write xmp:Rating -1, which Immich reads
-        // as "rejected". Only a real 1..5 rating is a rating.
-        const int         rating  = (item.rating() >= 1 && item.rating() <= 5)
-                                        ? item.rating() : 0;
-        const QString     comment = item.comment();
-        const bool        hasGps  = item.hasGeolocationInfo();
+        QStringList generatedKeys;
 
-        if (!tags.isEmpty() || rating > 0 || !comment.isEmpty() || hasGps)
+        if (!tags.isEmpty())
         {
-            QStringList generatedKeys;
+            generatedKeys << QStringLiteral("digiKam:TagsList");
+        }
 
-            if (!tags.isEmpty())
-            {
-                generatedKeys << QStringLiteral("digiKam:TagsList");
-            }
+        if (rating > 0)
+        {
+            generatedKeys << QStringLiteral("xmp:Rating");
+        }
 
-            if (rating > 0)
-            {
-                generatedKeys << QStringLiteral("xmp:Rating");
-            }
+        if (!comment.isEmpty())
+        {
+            generatedKeys << QStringLiteral("dc:description");
+        }
 
-            if (!comment.isEmpty())
-            {
-                generatedKeys << QStringLiteral("dc:description");
-            }
+        if (hasGps)
+        {
+            generatedKeys << QStringLiteral("exif:GPSLatitude")
+                          << QStringLiteral("exif:GPSLongitude");
+        }
 
-            if (hasGps)
-            {
-                generatedKeys << QStringLiteral("exif:GPSLatitude")
-                              << QStringLiteral("exif:GPSLongitude");
-            }
+        const QString xmp = mergeSidecarPackets(
+            buildSidecarPacket(tags, rating, comment,
+                               hasGps,
+                               hasGps ? fields.latitude : 0.0,
+                               hasGps ? fields.longitude : 0.0),
+            basePacket, generatedKeys);
 
-            const QString xmp = mergeSidecarPackets(
-                buildSidecarPacket(tags, rating, comment,
-                                   hasGps,
-                                   hasGps ? item.latitude() : 0.0,
-                                   hasGps ? item.longitude() : 0.0),
-                basePacket, generatedKeys);
+        const QString written = writeTempSidecar(tempPath, xmp);
 
-            QFile file(tempPath);
-
-            if (file.open(QIODevice::WriteOnly) && file.write(xmp.toUtf8()) == xmp.toUtf8().size())
-            {
-                d->tempSidecar = tempPath;
-                return tempPath;
-            }
+        if (!written.isEmpty())
+        {
+            return written;
         }
     }
 
@@ -631,13 +642,7 @@ QString ImmichWindow::sidecarFor(const QUrl& url, const QString& filePath)
     //    so Immich gives it sidecar precedence.
     if (!basePacket.isEmpty())
     {
-        QFile file(tempPath);
-
-        if (file.open(QIODevice::WriteOnly) && file.write(basePacket.toUtf8()) == basePacket.toUtf8().size())
-        {
-            d->tempSidecar = tempPath;
-            return tempPath;
-        }
+        return writeTempSidecar(tempPath, basePacket);
     }
 
     return QString();

@@ -173,10 +173,26 @@ private:
     void nextDownload();
     void continueDownloads();
     void nextMeta();
-    bool writeRecordSidecar(const QString& targetFile, const QJsonObject& record);
+    bool writeRecordSidecar(const QString& targetFile, const SyncFields& fields);
     void finishDownload();
-    QString sidecarFor(const QUrl& url, const QString& filePath);
+    QString sidecarFor(const SyncFields& fields, const QString& filePath);
     SyncFields dkFieldsFor(const QUrl& url) const;
+    /** Claim a server asset for this selection: appends the id
+     * to the album list and returns true on the first claim;
+     * a later file resolving to the same asset counts as a
+     * duplicate within the selection and returns false.
+     */
+    bool claimAssetId(const QString& assetId);
+    void queueSyncJob(const QString& assetId, const QString& localPath,
+                      const SyncFields& dk);
+    /** Write a generated sidecar to its temp path and register
+     * it for removal when the upload finishes; empty on failure.
+     */
+    QString writeTempSidecar(const QString& tempPath, const QString& packet);
+    /** Record the current identity match as the copy the file
+     * at path replaces once its upload lands.
+     */
+    void markReplace(const QString& path);
 
     class Private;
     Private* const d;

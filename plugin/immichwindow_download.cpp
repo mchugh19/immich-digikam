@@ -179,16 +179,6 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
 
         QString name = asset.fileName;
 
-        if (!claimed.contains(name) && QFileInfo::exists(d->dlDir + QLatin1Char('/') + name))
-        {
-            // Already downloaded by an earlier run: skip the file,
-            // but queue a metadata refresh so Immich-side tag,
-            // rating or caption changes still reach digiKam.
-            claimed.insert(name);
-            d->metaPending.append(qMakePair(asset.id, d->dlDir + QLatin1Char('/') + name));
-            continue;
-        }
-
         if (claimed.contains(name))
         {
             // A different asset in the same album carries the same
@@ -199,13 +189,16 @@ void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
             name = info.completeBaseName()
                    + QStringLiteral("-") + asset.id.left(8)
                    + suffix;
+        }
 
-            if (QFileInfo::exists(d->dlDir + QLatin1Char('/') + name))
-            {
-                claimed.insert(name);
-                d->metaPending.append(qMakePair(asset.id, d->dlDir + QLatin1Char('/') + name));
-                continue;
-            }
+        if (QFileInfo::exists(d->dlDir + QLatin1Char('/') + name))
+        {
+            // Already downloaded by an earlier run: skip the file,
+            // but queue a metadata refresh so Immich-side tag,
+            // rating or caption changes still reach digiKam.
+            claimed.insert(name);
+            d->metaPending.append(qMakePair(asset.id, d->dlDir + QLatin1Char('/') + name));
+            continue;
         }
 
         claimed.insert(name);
@@ -291,10 +284,14 @@ void ImmichWindow::nextDownload()
 void ImmichWindow::slotAssetRecord(const QString& assetId, const QString& targetFile,
                                    const QJsonObject& record)
 {
-    writeRecordSidecar(targetFile, record);
+    // One parse of the record, shared by the sidecar and the
+    // snapshot: the two used to parse it separately and could
+    // disagree (the sidecar's rating fallback treated an
+    // explicit 0 as absent and never clamped negatives).
+    const ServerFields sv = serverFieldsFromRecord(record);
+    writeRecordSidecar(targetFile, sv.fields);
 
     // Post-pull snapshot: digiKam now holds the server's fields.
-    const ServerFields sv = serverFieldsFromRecord(record);
     storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.checksum, sv.fields);
 
     slotDownloadFinished(assetId, true);
@@ -303,59 +300,27 @@ void ImmichWindow::slotAssetRecord(const QString& assetId, const QString& target
 void ImmichWindow::slotMetaRecord(const QString& assetId, const QString& targetFile,
                                   const QJsonObject& record)
 {
-    const bool updated = writeRecordSidecar(targetFile, record);
-
     const ServerFields sv = serverFieldsFromRecord(record);
+    const bool updated = writeRecordSidecar(targetFile, sv.fields);
+
     storeSnapshot(assetId, sv.fields, sv.updatedAt, sv.checksum, sv.fields);
 
     slotMetaFinished(assetId, updated);
 }
 
-bool ImmichWindow::writeRecordSidecar(const QString& targetFile, const QJsonObject& record)
+bool ImmichWindow::writeRecordSidecar(const QString& targetFile, const SyncFields& fields)
 {
-    // Generate a sidecar from an Immich asset record so digiKam
-    // imports the tags, rating, caption and GPS together with the
-    // photo. Tag names live in the record's tags array ("value" in
-    // current servers, "name" in older ones); rating and friends
-    // live in exifInfo. Returns false when the record carries no
-    // metadata worth writing (any local sidecar is left alone).
-    const QJsonObject exif = record.value(QStringLiteral("exifInfo")).toObject();
-
-    QStringList tags;
-    const QJsonArray tagItems = record.value(QStringLiteral("tags")).toArray();
-
-    for (const QJsonValue& value : tagItems)
+    // Generate a sidecar from an asset's server fields so
+    // digiKam imports the tags, rating, caption and GPS
+    // together with the photo. Returns false when the fields
+    // carry no metadata worth writing (any local sidecar is
+    // left alone).
+    if (!fields.tags.isEmpty() || fields.rating != 0
+        || !fields.description.isEmpty() || fields.hasGps)
     {
-        const QJsonObject tag = value.toObject();
-        QString           name = tag.value(QStringLiteral("value")).toString();
-
-        if (name.isEmpty())
-        {
-            name = tag.value(QStringLiteral("name")).toString();
-        }
-
-        if (!name.isEmpty() && !tags.contains(name))
-        {
-            tags << name;
-        }
-    }
-
-    int rating = exif.value(QStringLiteral("rating")).toInt();
-
-    if (rating == 0)
-    {
-        rating = record.value(QStringLiteral("rating")).toInt();
-    }
-
-    const QString    description = exif.value(QStringLiteral("description")).toString();
-    const QJsonValue lat         = exif.value(QStringLiteral("latitude"));
-    const QJsonValue lon         = exif.value(QStringLiteral("longitude"));
-    const bool       hasGps      = lat.isDouble() && lon.isDouble();
-
-    if (!tags.isEmpty() || rating != 0 || !description.isEmpty() || hasGps)
-    {
-        const QString   packet = buildSidecarPacket(tags, rating, description, hasGps,
-                                                    lat.toDouble(), lon.toDouble());
+        const QString   packet = buildSidecarPacket(fields.tags, fields.rating,
+                                                    fields.description, fields.hasGps,
+                                                    fields.latitude, fields.longitude);
         const QByteArray bytes = packet.toUtf8();
 
         // Already current: leave the local sidecar (and its
