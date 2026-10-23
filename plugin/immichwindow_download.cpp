@@ -45,6 +45,7 @@
 // KDE includes
 
 #include <KFile>
+#include <KUrlRequester>
 #include <klocalizedstring.h>
 
 // Local includes
@@ -53,6 +54,7 @@
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
+#include "immichxmp.h"
 
 namespace DigikamGenericImmichPlugin
 {

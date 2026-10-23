@@ -58,20 +58,6 @@
 namespace DigikamGenericImmichPlugin
 {
 
-namespace
-{
-
-// The replace at the head of the restore queue, or nullptr
-// when the queue has run out: the restore slots all guard on
-// the head matching the reply they were waiting for.
-const ImmichWindow::Private::ReplaceCtx* restoreHead(const ImmichWindow::Private* d)
-{
-    return d->restoreQueue.isEmpty() ? nullptr
-                                     : &d->restoreQueue.constFirst();
-}
-
-} // namespace
-
 void ImmichWindow::startRestoreOrSync()
 {
     if (d->replaces.isEmpty())
@@ -121,7 +107,7 @@ void ImmichWindow::slotRestoreAlbums(const QString& assetId, const QStringList& 
 {
     d->restoreWaitingAlbums = false;
 
-    const Private::ReplaceCtx* const head = restoreHead(d);
+    const Private::ReplaceCtx* const head = Private::queueHead(d->restoreQueue);
 
     if (!d->restoring || !head || head->oldId != assetId)
     {
@@ -187,7 +173,7 @@ void ImmichWindow::restoreStackStep()
 void ImmichWindow::slotStackFetched(const QString& stackId, const QStringList& memberIds,
                                     int httpStatus)
 {
-    const Private::ReplaceCtx* const head = restoreHead(d);
+    const Private::ReplaceCtx* const head = Private::queueHead(d->restoreQueue);
 
     if (!d->restoring || !head || head->stackId != stackId)
     {
@@ -222,7 +208,7 @@ void ImmichWindow::slotStackFetched(const QString& stackId, const QStringList& m
 void ImmichWindow::slotStackCreated(const QString& firstAssetId, const QString& stackId,
                                     int httpStatus)
 {
-    const Private::ReplaceCtx* const head = restoreHead(d);
+    const Private::ReplaceCtx* const head = Private::queueHead(d->restoreQueue);
 
     if (!d->restoring || !head || head->newId != firstAssetId)
     {

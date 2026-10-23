@@ -283,6 +283,14 @@ public:
         QString newId;
         QString stackId;   // the old copy's stack, if it has one
     };
+
+    // The replace at the head of a restore queue, or nullptr
+    // when it has run out: the restore slots all guard on the
+    // head matching the reply they were waiting for.
+    static const ReplaceCtx* queueHead(const QList<ReplaceCtx>& queue)
+    {
+        return queue.isEmpty() ? nullptr : &queue.constFirst();
+    }
     QList<ReplaceCtx> replaces;
     QList<ReplaceCtx> restoreQueue;
     QStringList  restoreAlbums;
