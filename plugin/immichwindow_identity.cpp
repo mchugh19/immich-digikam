@@ -243,15 +243,26 @@ void ImmichWindow::finishIdentityCheck(const QImage& localImage, const QByteArra
     if (same)
     {
         // The same photo with changed bytes: keep the server's
-        // copy, sync digiKam's metadata onto it.
-        d->uploadedIds.append(d->identityCandidateId);
+        // copy, sync digiKam's metadata onto it. An asset an
+        // earlier file in this selection already claimed counts
+        // as a duplicate within the selection, not as another
+        // asset found.
+        if (d->uploadedIds.contains(d->identityCandidateId))
+        {
+            ++d->selectionDuplicates;
+        }
+        else
+        {
+            d->uploadedIds.append(d->identityCandidateId);
+            ++d->alreadyThere;
+        }
+
         Private::SyncJob job;
         job.assetId   = d->identityCandidateId;
         job.localPath = path;
         job.dk        = dkFieldsFor(url);
         d->syncJobs.append(job);
         ++d->matchedSync;
-        ++d->alreadyThere;
         ++d->done;
         d->progress->setValue(d->done);
         nextIdentity();

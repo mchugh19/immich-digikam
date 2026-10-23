@@ -97,6 +97,7 @@ void ImmichWindow::slotUploadSelection()
     d->done        = 0;
     d->failed      = 0;
     d->alreadyThere = 0;
+    d->selectionDuplicates = 0;
     d->uploading   = true;
 
     d->syncJobs.clear();
@@ -190,19 +191,31 @@ void ImmichWindow::slotUploadCheck(const QMap<QString, QString>& duplicatesByPat
         }
         else
         {
-            // Already on the server: count it, and keep its id so
-            // a target album still gets the asset assigned. Its
-            // digiKam metadata is queued for the diff sync that
-            // runs after the uploads: the file itself is not
+            // Already on the server: count the asset, and keep
+            // its id so a target album still gets it assigned.
+            // A file whose asset an earlier file in this same
+            // selection already claimed (byte-identical files,
+            // say) is a duplicate within the selection: the asset
+            // is counted and queued once, not once per file. Its
+            // digiKam metadata is still queued for the diff sync
+            // that runs after the uploads: the file itself is not
             // re-sent, but changed tags, rating, caption and GPS
             // still reach the server through the API.
-            d->uploadedIds.append(assetId);
+            if (d->uploadedIds.contains(assetId))
+            {
+                ++d->selectionDuplicates;
+            }
+            else
+            {
+                d->uploadedIds.append(assetId);
+                ++d->alreadyThere;
+            }
+
             Private::SyncJob job;
             job.assetId   = assetId;
             job.localPath = url.toLocalFile();
             job.dk        = dkFieldsFor(url);
             d->syncJobs.append(job);
-            ++d->alreadyThere;
             ++d->done;
         }
     }
@@ -262,8 +275,18 @@ void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*
     }
 
     // Duplicates count too: the asset exists on the server, so it
-    // can still be assigned to the target album.
-    d->uploadedIds.append(assetId);
+    // can still be assigned to the target album. But an asset an
+    // earlier file in this selection already claimed is a
+    // duplicate within the selection, counted as such instead of
+    // being queued for the album a second time.
+    if (!assetId.isEmpty() && d->uploadedIds.contains(assetId))
+    {
+        ++d->selectionDuplicates;
+    }
+    else
+    {
+        d->uploadedIds.append(assetId);
+    }
 
     if (d->haveUploadFields && !assetId.isEmpty())
     {
@@ -364,7 +387,8 @@ void ImmichWindow::printUploadSummary()
     // counts, so reporting each separately produced a paragraph
     // that contradicted itself; here every outcome is counted
     // once, in the order it happened.
-    const int uploaded = qMax(0, d->done - d->failed - d->alreadyThere);
+    const int uploaded = qMax(0, d->done - d->failed - d->alreadyThere
+                                 - d->selectionDuplicates);
 
     QString uploadedPart = i18n("%1 uploaded").arg(uploaded);
 
@@ -396,6 +420,13 @@ void ImmichWindow::printUploadSummary()
     QStringList parts;
     parts << uploadedPart;
     parts << i18n("%1 already in Immich").arg(d->alreadyThere);
+
+    if (d->selectionDuplicates > 0)
+    {
+        parts << i18np("%1 duplicate in the selection",
+                       "%1 duplicates in the selection",
+                       d->selectionDuplicates);
+    }
 
     if (d->syncRan)
     {

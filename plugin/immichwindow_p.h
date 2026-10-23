@@ -164,6 +164,7 @@ public:
     int          done        = 0;
     int          failed      = 0;
     int          alreadyThere = 0;
+    int          selectionDuplicates = 0;
     bool         uploading   = false;
     bool         checking    = false;
     bool         cancelling  = false;
