@@ -152,7 +152,23 @@ const QString& ImmichSession::exportTargetMode() const
 
 void ImmichSession::setUrl(const QString& newUrl)
 {
-    d->url = newUrl;
+    // Store the server root, normalized once here so every
+    // consumer sees the same shape: no trailing slash, and no
+    // /api suffix (the talker appends it; a user pasting the
+    // API base URL gets the root they meant).
+    QString cleaned = newUrl.trimmed();
+
+    while (cleaned.endsWith(QLatin1Char('/')))
+    {
+        cleaned.chop(1);
+    }
+
+    if (cleaned.endsWith(QStringLiteral("/api")))
+    {
+        cleaned.chop(4);
+    }
+
+    d->url = cleaned;
 }
 
 void ImmichSession::setApiKey(const QString& newKey)
@@ -228,7 +244,7 @@ void ImmichSession::save()
 void ImmichSession::load()
 {
     KConfigGroup group = KSharedConfig::openConfig()->group(QStringLiteral("Immich Settings"));
-    d->url = group.readEntry("ServerUrl", QString());
+    setUrl(group.readEntry("ServerUrl", QString()));
 
     // The wallet wins when it has the key. A legacy plaintext entry
     // is used only when the wallet has none, and is migrated into

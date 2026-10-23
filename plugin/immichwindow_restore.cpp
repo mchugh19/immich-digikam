@@ -111,11 +111,14 @@ void ImmichWindow::restoreNext()
         return;
     }
 
+    d->restoreWaitingAlbums = true;
     d->talker->listAlbumsForAsset(d->restoreQueue.constFirst().oldId);
 }
 
 void ImmichWindow::slotRestoreAlbums(const QString& assetId, const QStringList& albumIds)
 {
+    d->restoreWaitingAlbums = false;
+
     if (!d->restoring || d->restoreQueue.isEmpty()
         || d->restoreQueue.constFirst().oldId != assetId)
     {

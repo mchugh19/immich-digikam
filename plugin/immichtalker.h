@@ -41,22 +41,31 @@ class ImmichSession;
  *   GET  /albums                    list albums
  *   POST /albums                    create an album
  *   PUT  /albums/<id>/assets        add assets to an album
+ *   GET  /albums?assetId=<id>       the albums containing an asset
  *   POST /assets                    multipart upload (assetData,
  *                                   optional sidecarData)
- *   POST /search/metadata           an album's assets (3.x does not
- *                                   embed them in the album record)
+ *   DELETE /assets                  move assets to the trash
+ *   POST /search/metadata           an album's or tag's assets
+ *                                   (3.x does not embed them in
+ *                                   the album record); also the
+ *                                   by-name search for the export
+ *                                   identity match
  *   GET  /assets/<id>               one asset's full record
  *   GET  /assets/<id>/original      download the original file
  *   GET  /assets/<id>/sidecar       download its XMP sidecar (404
  *                                   when the asset has none)
+ *   GET  /assets/<id>/thumbnail     the generated preview image
  *   POST /assets/bulk-upload-check  which of a set of SHA-1
  *                                   checksums the server already
  *                                   has (action reject = duplicate)
  *   PUT  /assets/<id>               metadata sync (rating,
  *                                   description, GPS) for an
  *                                   already-uploaded asset
+ *   GET  /tags                      list tags
  *   POST /tags                      create a tag
  *   PUT  /tags/assets               assign a tag to assets
+ *   POST /stacks                    create a stack
+ *   GET  /stacks/<id>               a stack's member ids
  *
  * Authentication is the x-api-key header on every request.
  */
@@ -179,7 +188,6 @@ public:
 
 Q_SIGNALS:
 
-    void signalBusy(bool val);
     void signalError(const QString& msg);
     void signalAlbums(const QList<ImmichAlbum>& albumList);
     void signalTags(const QList<ImmichTag>& tagList);
@@ -223,8 +231,18 @@ private Q_SLOTS:
 private:
 
     QNetworkRequest makeRequest(const QString& path) const;
-    void sendJson(const QString& method, const QString& path, const QByteArray& body);
-    void fetchListingPage(int page);
+    QNetworkReply* sendGet(const QString& path);
+    QNetworkReply* sendJson(const QString& method, const QString& path,
+                            const QJsonObject& body);
+    /** Emit signalError for a failed reply, appending the
+     * server's own message where it sent one.
+     */
+    void emitReplyError(QNetworkReply* reply);
+    /** Take a sync-family reply's context and HTTP status and
+     * parse its body as a JSON object; the reply is deleted.
+     */
+    QJsonObject takeSyncReply(QNetworkReply* reply, QString& ctx, int& httpStatus);
+    void fetchSearchPage(int page);
 
     class Private;
     Private* const d;

@@ -815,7 +815,9 @@ void ImmichWindow::slotCancelTransfer()
     d->metaPending.clear();
     d->identityQueue.clear();
     d->identityWaitingThumb = false;
+    d->identitySearching = false;
     d->restoring = false;
+    d->restoreWaitingAlbums = false;
     d->status->setText(i18n("Cancelling..."));
     d->talker->cancel();
 }
@@ -861,6 +863,30 @@ void ImmichWindow::slotError(const QString& msg)
         d->checking = false;
         d->status->setText(i18n("Duplicate check failed (%1); uploading everything.").arg(msg));
         nextUpload();
+        return;
+    }
+
+    if (d->identitySearching)
+    {
+        // The identity search is an optimisation too: a failed
+        // search leaves the file unverified, so it uploads as
+        // new (identical bytes still come back "duplicate"
+        // from the server) instead of stalling the batch.
+        d->identitySearching = false;
+        d->status->setText(i18n("Existing-copy check failed (%1); uploading as new.").arg(msg));
+        d->pending.append(d->identityUrl);
+        nextIdentity();
+        return;
+    }
+
+    if (d->restoreWaitingAlbums)
+    {
+        // The album listing for the copy being replaced failed:
+        // continue with no albums, the same landing as an empty
+        // reply, rather than stalling the replace chain.
+        d->restoreWaitingAlbums = false;
+        d->status->setText(msg);
+        slotRestoreAlbums(d->restoreQueue.constFirst().oldId, QStringList());
         return;
     }
 

@@ -124,6 +124,7 @@ void ImmichWindow::slotUploadSelection()
     d->identityWaitingThumb = false;
     d->identityPass = 1;
     d->identityNameSeen = false;
+    d->identitySearching = false;
     d->matchedSync   = 0;
     d->matchedMulti  = 0;
     d->stackedCount  = 0;
@@ -138,6 +139,7 @@ void ImmichWindow::slotUploadSelection()
     d->restoreAlbums.clear();
     d->restoreTrashQueue.clear();
     d->restoring = false;
+    d->restoreWaitingAlbums = false;
 
     setTransferButtonsEnabled(false);
     d->progress->setRange(0, d->total);

@@ -93,11 +93,14 @@ void ImmichWindow::nextIdentity()
     // complete miss there earns a library-wide second pass.
     d->identityPass     = 1;
     d->identityNameSeen = false;
+    d->identitySearching = true;
     d->talker->searchByFileName(QFileInfo(path).fileName(), d->targetAlbumId);
 }
 
 void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray& items)
 {
+    d->identitySearching = false;
+
     if (d->cancelling || !d->uploading)
     {
         return;
@@ -151,6 +154,7 @@ void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray&
             // in Immich, say), so try once library-wide before
             // treating the file as new.
             d->identityPass = 2;
+            d->identitySearching = true;
             d->talker->searchByFileName(QFileInfo(path).fileName());
             return;
         }

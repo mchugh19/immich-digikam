@@ -270,6 +270,7 @@ public:
     bool         identityWaitingLocal = false;
     int          identityPass = 1;      // 1 = target-album scope, 2 = library
     bool         identityNameSeen = false;
+    bool         identitySearching = false;
     int          matchedSync   = 0;
     int          matchedMulti  = 0;
     int          stackedCount  = 0;
@@ -296,6 +297,7 @@ public:
     QRadioButton* albumRadio   = nullptr;
     QWidget*     pickerBox     = nullptr;
     bool         restoring = false;
+    bool         restoreWaitingAlbums = false;
     QString      currentUploadPath;
 
     QList<SyncJob> syncJobs;
