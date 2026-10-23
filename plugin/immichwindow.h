@@ -23,6 +23,7 @@
 #include <QJsonObject>
 #include <QPixmap>
 
+class QListWidget;
 class QListWidgetItem;
 class QShowEvent;
 
@@ -134,6 +135,27 @@ private:
     void setTransferButtonsEnabled(bool enabled);
     void setConnected(bool connected);
     void updateConnectionUi();
+    /** The one owner of the New Album and Start buttons'
+     * enabled state: usable exactly when the window is
+     * connected and no transfer is running.
+     */
+    void refreshActionButtons();
+    /** Copy the connection edits into the session; every
+     * action entry point starts from what the user sees.
+     */
+    void syncSessionFromEdits();
+    /** Session cache key for a source's contents listing. */
+    QString listingKeyFor(const QString& sourceId) const;
+    /** Ask the talker for the current source's assets. */
+    void listSourceAssets(const QString& sourceId);
+    QListWidgetItem* findGridItem(QListWidget* grid, const QString& id) const;
+    /** Zero every export-run counter and queue (start of a
+     * run). clearExportQueues is the container-and-flag half,
+     * shared with the cancel path, which keeps its counters
+     * for the cancellation report.
+     */
+    void resetExportState();
+    void clearExportQueues();
     void setListingLoading(bool loading);
     void applyFilter();
     QListWidgetItem* findAlbumItem(const QString& id) const;

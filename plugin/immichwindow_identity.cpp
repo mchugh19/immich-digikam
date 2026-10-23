@@ -72,8 +72,10 @@ namespace DigikamGenericImmichPlugin
 
 void ImmichWindow::markReplace(const QString& path)
 {
-    d->replaceOldByPath.insert(path, d->identityCandidateId);
-    d->replaceStackByPath.insert(path, d->identityStackId);
+    Private::ReplaceMark mark;
+    mark.oldId   = d->identityMatch.assetId;
+    mark.stackId = d->identityMatch.stackId;
+    d->replaceByPath.insert(path, mark);
 }
 
 void ImmichWindow::nextIdentity()
@@ -161,15 +163,12 @@ void ImmichWindow::slotIdentitySearch(const QString& /*name*/, const QJsonArray&
             return;
         }
 
-        d->pending.append(url);
+        d->uploadQueue.append(url);
         nextIdentity();
         return;
     }
 
-    d->identityCandidateId  = match.assetId;
-    d->identityStackId      = match.stackId;
-    d->identityStrict       = match.strictTime;
-    d->identityDimsDiffer   = match.dimsDiffer;
+    d->identityMatch = match;
     d->identityWaitingThumb = true;
     d->talker->fetchThumbnail(match.assetId);
 }
@@ -218,7 +217,7 @@ void ImmichWindow::finishIdentityCheck(const QImage& localImage, const QByteArra
     QImage remoteImage;
     remoteImage.loadFromData(bytes);
 
-    if (d->identityDimsDiffer)
+    if (d->identityMatch.dimsDiffer)
     {
         // Cropped or resized since the upload. That is a real
         // edit by definition; the only question is whether this
@@ -230,7 +229,7 @@ void ImmichWindow::finishIdentityCheck(const QImage& localImage, const QByteArra
             markReplace(path);
         }
 
-        d->pending.append(url);
+        d->uploadQueue.append(url);
         nextIdentity();
         return;
     }
@@ -247,26 +246,26 @@ void ImmichWindow::finishIdentityCheck(const QImage& localImage, const QByteArra
         // earlier file in this selection already claimed counts
         // as a duplicate within the selection, not as another
         // asset found.
-        if (claimAssetId(d->identityCandidateId))
+        if (claimAssetId(d->identityMatch.assetId))
         {
             ++d->alreadyThere;
         }
 
-        queueSyncJob(d->identityCandidateId, path, dkFieldsFor(url));
+        queueSyncJob(d->identityMatch.assetId, path, dkFieldsFor(url));
         ++d->done;
         d->progress->setValue(d->done);
         nextIdentity();
         return;
     }
 
-    if (d->identityStrict)
+    if (d->identityMatch.strictTime)
     {
         // A real edit of a photo the server holds: upload it and
         // replace the old copy once the upload lands.
         markReplace(path);
     }
 
-    d->pending.append(url);
+    d->uploadQueue.append(url);
     nextIdentity();
 }
 

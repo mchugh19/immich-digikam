@@ -24,48 +24,36 @@
 #include <cmath>
 #include <utility>
 
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QFrame>
 #include <QComboBox>
 #include <QDateTime>
 #include <QHash>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
-#include <QImageReader>
 #include <QPixmap>
-#include <QShowEvent>
 #include <QRadioButton>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
-#include <QStackedLayout>
 #include <QStandardPaths>
-#include <QPainter>
-#include <QTimer>
 #include <QVBoxLayout>
 
 // KDE includes
 
 #include <KFile>
-#include <KUrlRequester>
 #include <klocalizedstring.h>
 
 // Local includes
 
 #include "dinfointerface.h"
-#include "dmetadata.h"
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
-#include "immichxmp.h"
 
 namespace DigikamGenericImmichPlugin
 {
@@ -129,6 +117,7 @@ void ImmichWindow::slotSyncRecord(const QString& assetId, const QJsonObject& rec
     }
 
     Private::SyncAssetCtx ctx;
+    ctx.dk = job->dk;
 
     if (httpStatus != 200 || record.isEmpty())
     {
@@ -251,20 +240,10 @@ void ImmichWindow::slotAssetPatched(const QString& assetId, int httpStatus)
 
 void ImmichWindow::finishSyncAsset(const QString& assetId)
 {
+    const bool haveCtx = d->syncCtx.contains(assetId);
     const Private::SyncAssetCtx ctx = d->syncCtx.take(assetId);
 
-    const Private::SyncJob* job = nullptr;
-
-    for (const Private::SyncJob& candidate : std::as_const(d->syncJobs))
-    {
-        if (candidate.assetId == assetId)
-        {
-            job = &candidate;
-            break;
-        }
-    }
-
-    if (ctx.failed || !job)
+    if (ctx.failed || !haveCtx)
     {
         ++d->syncFailed;
     }
@@ -308,7 +287,7 @@ void ImmichWindow::finishSyncAsset(const QString& assetId)
             }
         }
 
-        storeSnapshot(assetId, after, ctx.server.updatedAt, job->dk);
+        storeSnapshot(assetId, after, ctx.server.updatedAt, ctx.dk);
     }
 
     checkSyncPhaseDone();

@@ -23,53 +23,69 @@
 #include <algorithm>
 #include <cmath>
 
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QFrame>
 #include <QComboBox>
 #include <QDateTime>
 #include <QHash>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
 #include <QPixmap>
-#include <QShowEvent>
 #include <QRadioButton>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
-#include <QStackedLayout>
 #include <QStandardPaths>
-#include <QPainter>
-#include <QTimer>
 #include <QVBoxLayout>
 
 // KDE includes
 
 #include <KFile>
-#include <KUrlRequester>
 #include <klocalizedstring.h>
 
 // Local includes
 
 #include "dinfointerface.h"
-#include "dmetadata.h"
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
-#include "immichxmp.h"
 #include "loadingdescription.h"
 #include "thumbnailloadthread.h"
 #include "thumbnailinfo.h"
 
 namespace DigikamGenericImmichPlugin
 {
+
+namespace
+{
+
+// Preview items start with a full-size transparent placeholder
+// icon: an item created icon-less gets a text-only geometry, and
+// the thumbnail arriving later is then painted squashed into
+// that short box instead of the 96x96 the view advertises.
+QIcon placeholderIcon()
+{
+    QPixmap blank(96, 96);
+    blank.fill(Qt::transparent);
+    return QIcon(blank);
+}
+
+// Thumbnails are capped at the 96px the preview advertises.
+QPixmap scaledToThumb(const QPixmap& pix)
+{
+    if (pix.width() > 96 || pix.height() > 96)
+    {
+        return pix.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+
+    return pix;
+}
+
+} // namespace
 
 void ImmichWindow::fillUploadPreview()
 {
@@ -80,9 +96,7 @@ void ImmichWindow::fillUploadPreview()
         return;
     }
 
-    QPixmap blank(96, 96);
-    blank.fill(Qt::transparent);
-    const QIcon placeholder(blank);
+    const QIcon placeholder = placeholderIcon();
 
     const QList<QUrl> selected = d->iface->currentSelectedItems();
 
@@ -105,12 +119,7 @@ void ImmichWindow::fillUploadPreview()
         if (d->localThumbThread->find(ThumbnailIdentifier(path), pix, 96)
             && !pix.isNull())
         {
-            if (pix.width() > 96 || pix.height() > 96)
-            {
-                pix = pix.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            }
-
-            item->setIcon(QIcon(pix));
+            item->setIcon(QIcon(scaledToThumb(pix)));
         }
         else
         {
@@ -140,21 +149,11 @@ void ImmichWindow::slotLocalThumbnailLoaded(const LoadingDescription& desc,
         return;
     }
 
-    QPixmap scaled = pix;
-
-    if (scaled.width() > 96 || scaled.height() > 96)
+    // Selection paths are unique in the preview list, so the
+    // first match is the only one.
+    if (QListWidgetItem* const item = findGridItem(d->previewList, path))
     {
-        scaled = scaled.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    }
-
-    for (int i = 0 ; i < d->previewList->count() ; ++i)
-    {
-        QListWidgetItem* const item = d->previewList->item(i);
-
-        if (item->data(Qt::UserRole).toString() == path)
-        {
-            item->setIcon(QIcon(scaled));
-        }
+        item->setIcon(QIcon(scaledToThumb(pix)));
     }
 }
 
@@ -254,8 +253,7 @@ void ImmichWindow::startPreview(const QString& sourceId)
         return;
     }
 
-    const QString key = (d->sourceIsTags ? QStringLiteral("tag:")
-                                         : QStringLiteral("album:")) + sourceId;
+    const QString key = listingKeyFor(sourceId);
 
     if (d->session->hasListing(key))
     {
@@ -278,14 +276,7 @@ void ImmichWindow::startPreview(const QString& sourceId)
     d->listingPurpose = Private::ListingPurpose::Preview;
     d->status->setText(i18n("Listing contents..."));
 
-    if (d->sourceIsTags)
-    {
-        d->talker->listTagAssets(sourceId);
-    }
-    else
-    {
-        d->talker->listAlbumAssets(sourceId);
-    }
+    listSourceAssets(sourceId);
 }
 
 void ImmichWindow::fillPreview()
@@ -316,13 +307,7 @@ void ImmichWindow::fillPreview()
             break;
     }
 
-    // Items start with a full-size transparent placeholder icon:
-    // an item created icon-less gets a text-only geometry, and
-    // the thumbnail arriving later is then painted squashed into
-    // that short box instead of the 96x96 the view advertises.
-    QPixmap blank(96, 96);
-    blank.fill(Qt::transparent);
-    const QIcon placeholder(blank);
+    const QIcon placeholder = placeholderIcon();
 
     for (const ImmichAssetRef& asset : sorted)
     {
@@ -344,7 +329,6 @@ void ImmichWindow::fillPreview()
         }
     }
 
-    applyFilter();
     d->status->setText(i18n("%1 items").arg(sorted.size()));
 }
 
@@ -358,7 +342,7 @@ void ImmichWindow::slotPreviewSortChanged()
 
 void ImmichWindow::slotThumbnail(const QString& assetId, const QByteArray& bytes)
 {
-    if (d->identityWaitingThumb && assetId == d->identityCandidateId)
+    if (d->identityWaitingThumb && assetId == d->identityMatch.assetId)
     {
         d->identityWaitingThumb = false;
         slotIdentityThumb(assetId, bytes);
@@ -389,25 +373,14 @@ void ImmichWindow::slotThumbnail(const QString& assetId, const QByteArray& bytes
             {
                 if (job.cover)
                 {
-                    d->coverCache.insert(job.key, pix);
-
                     if (QListWidgetItem* const item = findAlbumItem(job.key))
                     {
                         setAlbumCover(item, pix);
                     }
                 }
-                else
+                else if (QListWidgetItem* const item = findGridItem(d->previewList, assetId))
                 {
-                    for (int i = 0 ; i < d->previewList->count() ; ++i)
-                    {
-                        QListWidgetItem* const item = d->previewList->item(i);
-
-                        if (item->data(Qt::UserRole).toString() == assetId)
-                        {
-                            item->setIcon(QIcon(pix));
-                            break;
-                        }
-                    }
+                    item->setIcon(QIcon(pix));
                 }
             }
         }

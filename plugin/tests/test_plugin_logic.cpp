@@ -233,14 +233,12 @@ private Q_SLOTS:
     void snapshotRoundTrips()
     {
         SyncSnapshot snap;
-        snap.checksum        = QStringLiteral("abc=");
         snap.serverUpdatedAt = QStringLiteral("2026-10-18T00:00:00.000Z");
         snap.serverHash      = QStringLiteral("s1");
         snap.dkHash          = QStringLiteral("d1");
 
         const SyncSnapshot back = SyncSnapshot::fromJson(snap.toJson());
 
-        QCOMPARE(back.checksum, snap.checksum);
         QCOMPARE(back.serverUpdatedAt, snap.serverUpdatedAt);
         QCOMPARE(back.serverHash, snap.serverHash);
         QCOMPARE(back.dkHash, snap.dkHash);

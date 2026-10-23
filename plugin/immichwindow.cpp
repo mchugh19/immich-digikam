@@ -24,7 +24,6 @@
 #include <cmath>
 
 #include <QBuffer>
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -34,11 +33,9 @@
 #include <QDateTime>
 #include <QHash>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
 #include <QImage>
-#include <QImageReader>
 #include <QPixmap>
 #include <QShowEvent>
 #include <QRadioButton>
@@ -49,8 +46,6 @@
 #include <QSet>
 #include <QStackedLayout>
 #include <QStandardPaths>
-#include <QPainter>
-#include <QTimer>
 #include <QVBoxLayout>
 
 // KDE includes
@@ -62,13 +57,11 @@
 // Local includes
 
 #include "dinfointerface.h"
-#include "dmetadata.h"
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
 #include "thumbnailloadthread.h"
 #include "thumbnailinfo.h"
-#include "immichxmp.h"
 
 namespace DigikamGenericImmichPlugin
 {
@@ -688,10 +681,46 @@ void ImmichWindow::updateExportStatus()
     d->status->setText(text);
 }
 
-void ImmichWindow::slotSaveSettings()
+void ImmichWindow::syncSessionFromEdits()
 {
     d->session->setUrl(d->urlEdit->text());
     d->session->setApiKey(d->keyEdit->text());
+}
+
+QString ImmichWindow::listingKeyFor(const QString& sourceId) const
+{
+    return (d->sourceIsTags ? QStringLiteral("tag:")
+                            : QStringLiteral("album:")) + sourceId;
+}
+
+void ImmichWindow::listSourceAssets(const QString& sourceId)
+{
+    if (d->sourceIsTags)
+    {
+        d->talker->listTagAssets(sourceId);
+    }
+    else
+    {
+        d->talker->listAlbumAssets(sourceId);
+    }
+}
+
+QListWidgetItem* ImmichWindow::findGridItem(QListWidget* grid, const QString& id) const
+{
+    for (int i = 0 ; i < grid->count() ; ++i)
+    {
+        if (grid->item(i)->data(Qt::UserRole).toString() == id)
+        {
+            return grid->item(i);
+        }
+    }
+
+    return nullptr;
+}
+
+void ImmichWindow::slotSaveSettings()
+{
+    syncSessionFromEdits();
     d->session->save();
     d->status->setText(i18n("Settings saved."));
 }
@@ -748,9 +777,8 @@ void ImmichWindow::updateConnectionUi()
     // than a blank form to guess at. The connection controls
     // themselves (URL, API key, Connect) always stay usable.
     const bool on   = d->connected;
-    const bool idle = !d->uploading && !d->downloading;
 
-    d->newAlbumBtn->setEnabled(on);
+    refreshActionButtons();
     d->replaceCombo->setEnabled(on);
     d->filterEdit->setEnabled(on);
     d->albumArea->setEnabled(on);
@@ -762,7 +790,7 @@ void ImmichWindow::updateConnectionUi()
     d->libraryRadio->setEnabled(on);
     d->albumRadio->setEnabled(on);
     d->downloadDirEdit->setEnabled(on);
-    startButton()->setEnabled(on && idle);
+
 }
 
 void ImmichWindow::applyTargetMode()
@@ -792,11 +820,19 @@ void ImmichWindow::updateTargetLabel()
                                 : i18n("Upload target: %1").arg(name));
 }
 
+void ImmichWindow::refreshActionButtons()
+{
+    const bool active = d->connected && !d->uploading && !d->downloading;
+    d->newAlbumBtn->setEnabled(active);
+    startButton()->setEnabled(active);
+}
+
 void ImmichWindow::setTransferButtonsEnabled(bool enabled)
 {
-    d->newAlbumBtn->setEnabled(enabled);
+    // Connect follows the caller's transfer phase; the action
+    // buttons derive from the window state in one place.
     d->connectBtn->setEnabled(enabled);
-    startButton()->setEnabled(enabled && d->connected);
+    refreshActionButtons();
 }
 
 void ImmichWindow::slotCancelTransfer()
@@ -807,14 +843,9 @@ void ImmichWindow::slotCancelTransfer()
     }
 
     d->cancelling = true;
-    d->pending.clear();
+    clearExportQueues();
     d->dlPending.clear();
     d->metaPending.clear();
-    d->identityQueue.clear();
-    d->identityWaitingThumb = false;
-    d->identitySearching = false;
-    d->restoring = false;
-    d->restoreWaitingAlbums = false;
     d->status->setText(i18n("Cancelling..."));
     d->talker->cancel();
 }
@@ -869,7 +900,7 @@ void ImmichWindow::slotError(const QString& msg)
         // from the server) instead of stalling the batch.
         d->identitySearching = false;
         d->status->setText(i18n("Existing-copy check failed (%1); uploading as new.").arg(msg));
-        d->pending.append(d->identityUrl);
+        d->uploadQueue.append(d->identityUrl);
         nextIdentity();
         return;
     }

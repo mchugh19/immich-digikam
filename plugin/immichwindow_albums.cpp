@@ -23,12 +23,9 @@
 #include <algorithm>
 #include <cmath>
 
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QFrame>
 #include <QComboBox>
 #include <QDateTime>
 #include <QHash>
@@ -36,9 +33,7 @@
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
-#include <QImageReader>
 #include <QPixmap>
-#include <QShowEvent>
 #include <QRadioButton>
 #include <QLineEdit>
 #include <QListWidget>
@@ -47,24 +42,19 @@
 #include <QSet>
 #include <QStackedLayout>
 #include <QStandardPaths>
-#include <QPainter>
-#include <QTimer>
 #include <QVBoxLayout>
 
 // KDE includes
 
 #include <KFile>
-#include <KUrlRequester>
 #include <klocalizedstring.h>
 
 // Local includes
 
 #include "dinfointerface.h"
-#include "dmetadata.h"
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
-#include "immichxmp.h"
 
 namespace DigikamGenericImmichPlugin
 {
@@ -110,19 +100,18 @@ QString dateRangeText(const QString& startIso, const QString& endIso)
              from.toString(QStringLiteral("yyyy")));
 }
 
+// Albums and tags both sort by name, case-insensitively.
+template <typename T>
+bool byName(const T& a, const T& b)
+{
+    return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
+}
+
 } // namespace
 
 QListWidgetItem* ImmichWindow::findAlbumItem(const QString& id) const
 {
-    for (int i = 0 ; i < d->albumGrid->count() ; ++i)
-    {
-        if (d->albumGrid->item(i)->data(Qt::UserRole).toString() == id)
-        {
-            return d->albumGrid->item(i);
-        }
-    }
-
-    return nullptr;
+    return findGridItem(d->albumGrid, id);
 }
 
 QString ImmichWindow::currentSourceId() const
@@ -217,9 +206,11 @@ void ImmichWindow::addAlbumTile(const QString& id, const QString& name,
 
     if (!thumbnailAssetId.isEmpty())
     {
-        const auto cached = d->coverCache.constFind(id);
+        // Covers live in the one thumbnail cache, keyed by the
+        // cover's asset id like every other thumbnail.
+        const auto cached = d->thumbCache.constFind(thumbnailAssetId);
 
-        if (cached != d->coverCache.constEnd())
+        if (cached != d->thumbCache.constEnd())
         {
             setAlbumCover(item, *cached);
         }
@@ -293,8 +284,7 @@ void ImmichWindow::setListingLoading(bool loading)
 
 void ImmichWindow::slotRefreshAlbums()
 {
-    d->session->setUrl(d->urlEdit->text());
-    d->session->setApiKey(d->keyEdit->text());
+    syncSessionFromEdits();
     d->session->clearListings();
 
     if (d->mode == Mode::Import && d->sourceIsTags)
@@ -399,11 +389,7 @@ void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
     d->tagGrid->clear();
 
     QList<ImmichTag> sorted = tags;
-    std::sort(sorted.begin(), sorted.end(),
-              [](const ImmichTag& a, const ImmichTag& b)
-              {
-                  return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
-              });
+    std::sort(sorted.begin(), sorted.end(), byName<ImmichTag>);
 
     const QIcon tagIcon(QStringLiteral(":/dk-tag.svg"));
 
@@ -415,13 +401,9 @@ void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
         item->setTextAlignment(Qt::AlignHCenter);
     }
 
-    for (int i = 0 ; i < d->tagGrid->count() ; ++i)
+    if (QListWidgetItem* const item = findGridItem(d->tagGrid, restoreId))
     {
-        if (d->tagGrid->item(i)->data(Qt::UserRole).toString() == restoreId)
-        {
-            d->tagGrid->setCurrentItem(d->tagGrid->item(i));
-            break;
-        }
+        d->tagGrid->setCurrentItem(item);
     }
 
     applyFilter();
@@ -435,8 +417,7 @@ void ImmichWindow::slotNewAlbum()
         return;
     }
 
-    d->session->setUrl(d->urlEdit->text());
-    d->session->setApiKey(d->keyEdit->text());
+    syncSessionFromEdits();
 
     bool ok = false;
     const QString name = QInputDialog::getText(this, i18n("New album"),
@@ -476,11 +457,7 @@ void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
     d->albumGrid->clear();
 
     QList<ImmichAlbum> sorted = albums;
-    std::sort(sorted.begin(), sorted.end(),
-              [](const ImmichAlbum& a, const ImmichAlbum& b)
-              {
-                  return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
-              });
+    std::sort(sorted.begin(), sorted.end(), byName<ImmichAlbum>);
 
     for (const ImmichAlbum& album : sorted)
     {

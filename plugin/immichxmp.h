@@ -13,6 +13,27 @@
 namespace DigikamGenericImmichPlugin
 {
 
+// XML escaping in the two shapes the packets need: attribute
+// values escape the quote but not '>', element text escapes
+// '>' but not the quote; the packet builder escapes both.
+inline QString escapeXml(QString s, bool quote, bool gt)
+{
+    s.replace(QLatin1Char('&'), QLatin1String("&amp;"));
+    s.replace(QLatin1Char('<'), QLatin1String("&lt;"));
+
+    if (gt)
+    {
+        s.replace(QLatin1Char('>'), QLatin1String("&gt;"));
+    }
+
+    if (quote)
+    {
+        s.replace(QLatin1Char('"'), QLatin1String("&quot;"));
+    }
+
+    return s;
+}
+
 // Build the XMP sidecar packet used in both directions: generated on
 // upload from digiKam's database, and generated on download from the
 // Immich asset record when the server holds no sidecar file. The shape
@@ -22,13 +43,9 @@ inline QString buildSidecarPacket(const QStringList& tags, int rating,
                                   const QString& description,
                                   bool hasGps, double latitude, double longitude)
 {
-    auto esc = [](QString s)
+    auto esc = [](const QString& s)
     {
-        s.replace(QLatin1Char('&'), QLatin1String("&amp;"));
-        s.replace(QLatin1Char('<'), QLatin1String("&lt;"));
-        s.replace(QLatin1Char('>'), QLatin1String("&gt;"));
-        s.replace(QLatin1Char('"'), QLatin1String("&quot;"));
-        return s;
+        return escapeXml(s, true, true);
     };
 
     // GPS as degrees,decimal-minutes with hemisphere (the exif form),
@@ -109,20 +126,14 @@ inline QString mergeSidecarPackets(const QString& generated,
         return generated;
     }
 
-    auto escAttr = [](QString s)
+    auto escAttr = [](const QString& s)
     {
-        s.replace(QLatin1Char('&'), QLatin1String("&amp;"));
-        s.replace(QLatin1Char('<'), QLatin1String("&lt;"));
-        s.replace(QLatin1Char('"'), QLatin1String("&quot;"));
-        return s;
+        return escapeXml(s, true, false);
     };
 
-    auto escText = [](QString s)
+    auto escText = [](const QString& s)
     {
-        s.replace(QLatin1Char('&'), QLatin1String("&amp;"));
-        s.replace(QLatin1Char('<'), QLatin1String("&lt;"));
-        s.replace(QLatin1Char('>'), QLatin1String("&gt;"));
-        return s;
+        return escapeXml(s, false, true);
     };
 
     QXmlStreamReader reader(base);

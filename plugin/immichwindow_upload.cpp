@@ -28,34 +28,25 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QFrame>
 #include <QComboBox>
 #include <QDateTime>
 #include <QHash>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
-#include <QImageReader>
 #include <QPixmap>
-#include <QShowEvent>
 #include <QRadioButton>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
-#include <QStackedLayout>
 #include <QStandardPaths>
-#include <QPainter>
-#include <QTimer>
 #include <QVBoxLayout>
 
 // KDE includes
 
 #include <KFile>
-#include <KUrlRequester>
 #include <klocalizedstring.h>
 
 // Local includes
@@ -70,40 +61,36 @@
 namespace DigikamGenericImmichPlugin
 {
 
-void ImmichWindow::slotUploadSelection()
+void ImmichWindow::clearExportQueues()
 {
-    if (d->uploading || d->downloading)
-    {
-        return;
-    }
+    d->uploadQueue.clear();
+    d->identityQueue.clear();
+    d->syncJobs.clear();
+    d->syncTagAdds.clear();
+    d->syncCtx.clear();
+    d->replaceByPath.clear();
+    d->replaces.clear();
+    d->restoreQueue.clear();
+    d->restoreAlbums.clear();
+    d->restoreTrashQueue.clear();
+    d->overwriteQueue.clear();
+    d->identityWaitingThumb = false;
+    d->identitySearching = false;
+    d->restoring = false;
+    d->restoreWaitingAlbums = false;
+}
 
-    d->session->setUrl(d->urlEdit->text());
-    d->session->setApiKey(d->keyEdit->text());
+void ImmichWindow::resetExportState()
+{
+    clearExportQueues();
 
-    const QList<QUrl> items = d->iface ? d->iface->currentSelectedItems()
-                                       : QList<QUrl>();
-
-    if (items.isEmpty())
-    {
-        d->status->setText(i18n("No items selected in digiKam."));
-        return;
-    }
-
-    d->targetAlbumId = currentSourceId();
-
-    d->pending     = items;
     d->uploadedIds.clear();
-    d->total       = items.size();
     d->done        = 0;
     d->failed      = 0;
     d->alreadyThere = 0;
     d->selectionDuplicates = 0;
     d->uploadedCount = 0;
-    d->uploading   = true;
 
-    d->syncJobs.clear();
-    d->syncTagAdds.clear();
-    d->syncCtx.clear();
     d->syncNextIndex = 0;
     d->syncFetchInFlight = 0;
     d->syncPatchInFlight = 0;
@@ -116,27 +103,38 @@ void ImmichWindow::slotUploadSelection()
     d->syncAborted   = false;
     d->albumAssigned = false;
 
-    d->identityQueue.clear();
-    d->identityCandidateId.clear();
-    d->identityStackId.clear();
-    d->identityStrict = false;
-    d->identityDimsDiffer = false;
-    d->identityWaitingThumb = false;
+    d->identityMatch = IdentityMatch();
     d->identityPass = 1;
-    d->identitySearching = false;
     d->stackedCount  = 0;
     d->trashFallbackCount = 0;
     d->overwriteCount = 0;
-    d->overwriteQueue.clear();
     d->replaceByStack = (d->session->replaceMode() != QStringLiteral("trash"));
-    d->replaceOldByPath.clear();
-    d->replaceStackByPath.clear();
-    d->replaces.clear();
-    d->restoreQueue.clear();
-    d->restoreAlbums.clear();
-    d->restoreTrashQueue.clear();
-    d->restoring = false;
-    d->restoreWaitingAlbums = false;
+}
+
+void ImmichWindow::slotUploadSelection()
+{
+    if (d->uploading || d->downloading)
+    {
+        return;
+    }
+
+    syncSessionFromEdits();
+
+    const QList<QUrl> items = d->iface ? d->iface->currentSelectedItems()
+                                       : QList<QUrl>();
+
+    if (items.isEmpty())
+    {
+        d->status->setText(i18n("No items selected in digiKam."));
+        return;
+    }
+
+    d->targetAlbumId = currentSourceId();
+
+    resetExportState();
+    d->uploadQueue = items;
+    d->total       = items.size();
+    d->uploading   = true;
 
     setTransferButtonsEnabled(false);
     d->progress->setRange(0, d->total);
@@ -180,7 +178,7 @@ void ImmichWindow::slotUploadCheck(const QMap<QString, QString>& duplicatesByPat
 
     QList<QUrl> remaining;
 
-    for (const QUrl& url : std::as_const(d->pending))
+    for (const QUrl& url : std::as_const(d->uploadQueue))
     {
         const QString assetId = duplicatesByPath.value(url.toLocalFile());
 
@@ -213,7 +211,7 @@ void ImmichWindow::slotUploadCheck(const QMap<QString, QString>& duplicatesByPat
     // What the checksum check missed goes through identity
     // matching first: a file whose bytes changed in digiKam may
     // still be a photo the server already has.
-    d->pending       = QList<QUrl>();
+    d->uploadQueue   = QList<QUrl>();
     d->identityQueue = remaining;
     d->progress->setValue(d->done);
     nextIdentity();
@@ -221,13 +219,13 @@ void ImmichWindow::slotUploadCheck(const QMap<QString, QString>& duplicatesByPat
 
 void ImmichWindow::nextUpload()
 {
-    if (d->pending.isEmpty())
+    if (d->uploadQueue.isEmpty())
     {
         finishUpload();
         return;
     }
 
-    const QUrl url        = d->pending.takeFirst();
+    const QUrl url        = d->uploadQueue.takeFirst();
     const QString path    = url.toLocalFile();
     const QFileInfo info(path);
 
@@ -245,10 +243,10 @@ void ImmichWindow::nextUpload()
                            .arg(d->done + 1)
                            .arg(d->total));
 
-    d->currentUploadFields = dkFieldsFor(url);
-    d->haveUploadFields    = true;
-    d->currentUploadPath   = path;
-    d->talker->uploadAsset(path, sidecarFor(d->currentUploadFields, path));
+    d->uploadInFlight.fields = dkFieldsFor(url);
+    d->uploadInFlight.active = true;
+    d->uploadInFlight.path   = path;
+    d->talker->uploadAsset(path, sidecarFor(d->uploadInFlight.fields, path));
 }
 
 void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*status*/)
@@ -275,32 +273,32 @@ void ImmichWindow::slotUploadSucceeded(const QString& assetId, const QString& /*
         ++d->uploadedCount;
     }
 
-    if (d->haveUploadFields && !assetId.isEmpty())
+    if (d->uploadInFlight.active && !assetId.isEmpty())
     {
         // Baseline snapshot for a fresh upload: what digiKam
         // sent is what the server now holds (the sidecar merge
         // may add preserved fields, but the synced fields are
         // these). The next run diffs against this.
-        storeSnapshot(assetId, d->currentUploadFields, QString(),
-                      d->currentUploadFields);
-        d->haveUploadFields = false;
+        storeSnapshot(assetId, d->uploadInFlight.fields, QString(),
+                      d->uploadInFlight.fields);
+        d->uploadInFlight.active = false;
     }
 
-    const QString replacedOld = d->replaceOldByPath.take(d->currentUploadPath);
+    const Private::ReplaceMark mark = d->replaceByPath.take(d->uploadInFlight.path);
 
-    if (!replacedOld.isEmpty() && !assetId.isEmpty())
+    if (!mark.oldId.isEmpty() && !assetId.isEmpty())
     {
         // This upload replaces an edited photo's old copy: its
         // albums are restored and the old copy trashed after the
         // uploads finish, and the new copy joins the sync set so
         // its metadata converges too.
         Private::ReplaceCtx ctx;
-        ctx.oldId     = replacedOld;
-        ctx.newId     = assetId;
-        ctx.stackId   = d->replaceStackByPath.take(d->currentUploadPath);
+        ctx.oldId   = mark.oldId;
+        ctx.newId   = assetId;
+        ctx.stackId = mark.stackId;
         d->replaces.append(ctx);
 
-        queueSyncJob(assetId, d->currentUploadPath, d->currentUploadFields);
+        queueSyncJob(assetId, d->uploadInFlight.path, d->uploadInFlight.fields);
     }
 
     ++d->done;

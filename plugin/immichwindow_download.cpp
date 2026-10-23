@@ -23,48 +23,36 @@
 #include <algorithm>
 #include <cmath>
 
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QFrame>
 #include <QComboBox>
 #include <QDateTime>
 #include <QHash>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
-#include <QImageReader>
 #include <QPixmap>
-#include <QShowEvent>
 #include <QRadioButton>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
-#include <QStackedLayout>
 #include <QStandardPaths>
-#include <QPainter>
-#include <QTimer>
 #include <QVBoxLayout>
 
 // KDE includes
 
 #include <KFile>
-#include <KUrlRequester>
 #include <klocalizedstring.h>
 
 // Local includes
 
 #include "dinfointerface.h"
-#include "dmetadata.h"
 #include "immichsession.h"
 #include "immichsync.h"
 #include "immichtalker.h"
-#include "immichxmp.h"
 
 namespace DigikamGenericImmichPlugin
 {
@@ -76,8 +64,7 @@ void ImmichWindow::slotDownloadAlbum()
         return;
     }
 
-    d->session->setUrl(d->urlEdit->text());
-    d->session->setApiKey(d->keyEdit->text());
+    syncSessionFromEdits();
 
     const QString sourceId = currentSourceId();
 
@@ -112,22 +99,14 @@ void ImmichWindow::slotDownloadAlbum()
     d->downloading    = true;
     d->dlListing      = true;
     d->listingPurpose = Private::ListingPurpose::Download;
-    d->listingKey     = (d->sourceIsTags ? QStringLiteral("tag:")
-                                         : QStringLiteral("album:")) + sourceId;
+    d->listingKey     = listingKeyFor(sourceId);
     dropThumbJobs(false);
 
     setTransferButtonsEnabled(false);
     d->cancelBtn->setEnabled(true);
     d->status->setText(i18n("Listing assets..."));
 
-    if (d->sourceIsTags)
-    {
-        d->talker->listTagAssets(sourceId);
-    }
-    else
-    {
-        d->talker->listAlbumAssets(sourceId);
-    }
+    listSourceAssets(sourceId);
 }
 
 void ImmichWindow::slotAlbumAssets(const QList<ImmichAssetRef>& assets)
