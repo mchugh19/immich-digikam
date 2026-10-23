@@ -1,5 +1,18 @@
 # immich-digikam
 
+> **This plugin is now part of digiKam.** It was merged upstream
+> for the digiKam 9.2 release as a built-in web-service tool, and
+> this repository is archived. Development continues in the
+> digiKam source tree; please do not file issues or pull requests
+> here.
+>
+> - Source: the [Immich plugin in digiKam](https://invent.kde.org/graphics/digikam/-/tree/master/core/dplugins/generic/webservices/immich) on KDE Invent
+> - Documentation: [Export to Immich](https://docs.digikam.org/en/export_tools/immich_export.html) and [Import from Immich](https://docs.digikam.org/en/import_tools/immich_import.html) in the digiKam handbook
+> - Bugs: report them on the [KDE bug tracker](https://bugs.kde.org/enter_bug.cgi?product=digiKam&component=Plugin-WebService-Immich), product digiKam, component **Plugin-WebService-Immich**
+>
+> Everything below describes the standalone out-of-tree build,
+> kept for reference.
+
 Sync digiKam albums with a self-hosted Immich server: pull an
 album's originals into digiKam, work on them there, push finished
 files back. Primary use case: building family collages and
