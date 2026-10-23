@@ -73,6 +73,44 @@
 namespace DigikamGenericImmichPlugin
 {
 
+namespace
+{
+
+// The loading overlay shown over a source grid while its listing
+// is in flight: a throbber and a label in a small panel, centred
+// over the grid, so a slow server reads as "loading" rather than
+// as an empty or stale view. The caller adds the overlay to the
+// grid's stacked layout; the spinner is handed back so the
+// caller can start and stop it.
+QWidget* makeLoadingOverlay(QWidget* const parent, const QString& text, SpinnerWidget** spinner)
+{
+    auto* const overlay = new QWidget(parent);
+
+    auto* const overlayLayout = new QVBoxLayout(overlay);
+    overlayLayout->addStretch();
+
+    auto* const loadingCard = new QFrame(overlay);
+    loadingCard->setFrameShape(QFrame::StyledPanel);
+    loadingCard->setAutoFillBackground(true);
+    auto* const cardLayout = new QVBoxLayout(loadingCard);
+    *spinner = new SpinnerWidget(loadingCard);
+    cardLayout->addWidget(*spinner, 0, Qt::AlignHCenter);
+    auto* const loadingLabel = new QLabel(text, loadingCard);
+    loadingLabel->setAlignment(Qt::AlignHCenter);
+    cardLayout->addWidget(loadingLabel);
+
+    auto* const cardRow = new QHBoxLayout;
+    cardRow->addStretch();
+    cardRow->addWidget(loadingCard);
+    cardRow->addStretch();
+    overlayLayout->addLayout(cardRow);
+    overlayLayout->addStretch();
+
+    return overlay;
+}
+
+} // namespace
+
 ImmichWindow::ImmichWindow(DInfoInterface* const iface,
                            ImmichSession* const session, Mode mode,
                            QWidget* const parent)
@@ -216,27 +254,8 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     d->albumStack = new QStackedLayout(d->albumArea);
     d->albumStack->setStackingMode(QStackedLayout::StackAll);
     d->albumStack->addWidget(d->albumGrid);
-    d->albumLoadingOverlay = new QWidget(d->albumArea);
-
-    auto* const overlayLayout = new QVBoxLayout(d->albumLoadingOverlay);
-    overlayLayout->addStretch();
-
-    auto* const loadingCard = new QFrame(d->albumLoadingOverlay);
-    loadingCard->setFrameShape(QFrame::StyledPanel);
-    loadingCard->setAutoFillBackground(true);
-    auto* const cardLayout = new QVBoxLayout(loadingCard);
-    d->albumSpinner = new SpinnerWidget(loadingCard);
-    cardLayout->addWidget(d->albumSpinner, 0, Qt::AlignHCenter);
-    auto* const loadingLabel = new QLabel(i18n("Loading albums..."), loadingCard);
-    loadingLabel->setAlignment(Qt::AlignHCenter);
-    cardLayout->addWidget(loadingLabel);
-
-    auto* const cardRow = new QHBoxLayout;
-    cardRow->addStretch();
-    cardRow->addWidget(loadingCard);
-    cardRow->addStretch();
-    overlayLayout->addLayout(cardRow);
-    overlayLayout->addStretch();
+    d->albumLoadingOverlay = makeLoadingOverlay(d->albumArea, i18n("Loading albums..."),
+                                                &d->albumSpinner);
 
     d->albumStack->addWidget(d->albumLoadingOverlay);
     d->albumStack->setCurrentWidget(d->albumGrid);
@@ -262,7 +281,24 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
     d->tagGrid->setWordWrap(true);
     d->tagGrid->setUniformItemSizes(true);
     d->tagGrid->setMinimumHeight(104 + 16);
-    d->tagGrid->setVisible(false);
+
+    // The tag grid gets an area of its own, built like the album
+    // area (grid plus loading overlay in a stacked layout), so a
+    // tag listing in flight shows the same loading state. The
+    // area starts hidden: Albums is the default source.
+    d->tagArea            = new QWidget;
+    d->tagArea->setMinimumHeight(104 + 16);
+    d->tagStack           = new QStackedLayout(d->tagArea);
+    d->tagStack->setStackingMode(QStackedLayout::StackAll);
+    d->tagStack->addWidget(d->tagGrid);
+    d->tagLoadingOverlay  = makeLoadingOverlay(d->tagArea, i18n("Loading tags..."),
+                                               &d->tagSpinner);
+    d->tagStack->addWidget(d->tagLoadingOverlay);
+    d->tagStack->setCurrentWidget(d->tagGrid);
+    d->tagLoadingOverlay->setVisible(false);
+    d->tagSpinner->toggleTimer(false);
+    d->tagArea->setVisible(false);
+
     d->previewList      = new QListWidget;
     d->previewList->setViewMode(QListWidget::IconMode);
     // Display only: Download always takes the whole album or
@@ -434,14 +470,14 @@ ImmichWindow::ImmichWindow(DInfoInterface* const iface,
         pickerLayout->addLayout(filterRow);
         pickerLayout->addWidget(d->albumArea, 2);
         layout->addWidget(d->pickerBox, 2);
-        layout->addWidget(d->tagGrid, 2);
+        layout->addWidget(d->tagArea, 2);
     }
     else
     {
         layout->addWidget(d->filterEdit);
         layout->addLayout(sourceRow);
         layout->addWidget(d->albumArea, 2);
-        layout->addWidget(d->tagGrid, 2);
+        layout->addWidget(d->tagArea, 2);
     }
 
     if (d->mode == Mode::Import)
@@ -721,7 +757,7 @@ void ImmichWindow::updateConnectionUi()
     d->replaceCombo->setEnabled(on);
     d->filterEdit->setEnabled(on);
     d->albumArea->setEnabled(on);
-    d->tagGrid->setEnabled(on);
+    d->tagArea->setEnabled(on);
     d->previewList->setEnabled(on);
     d->previewSort->setEnabled(on);
     d->albumsSrc->setEnabled(on);
@@ -788,14 +824,14 @@ void ImmichWindow::slotError(const QString& msg)
 {
     if (!d->uploading && !d->downloading)
     {
-        // An idle-time error is the album list's failure mode:
+        // An idle-time error is the listing's failure mode:
         // the load is over either way, so the spinner stops.
         // It also ends any connect attempt in flight; the
         // window's connected state is unchanged (an attempt
         // that fails before the first success leaves it
         // unconnected, and a later refresh failing does not
         // disconnect a working window).
-        setAlbumLoading(false);
+        setListingLoading(false);
         d->connecting = false;
     }
 

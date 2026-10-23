@@ -137,8 +137,12 @@ public:
     QStackedLayout* albumStack = nullptr;
     QWidget*      albumLoadingOverlay = nullptr;
     SpinnerWidget* albumSpinner = nullptr;
-    bool          albumsLoading = false;
+    bool          listingLoading = false;
     QListWidget*  tagGrid     = nullptr;
+    QWidget*      tagArea     = nullptr;
+    QStackedLayout* tagStack  = nullptr;
+    QWidget*      tagLoadingOverlay = nullptr;
+    SpinnerWidget* tagSpinner = nullptr;
     QListWidget*  previewList = nullptr;
     QComboBox*    previewSort = nullptr;
     QLabel*       targetLabel = nullptr;

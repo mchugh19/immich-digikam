@@ -265,19 +265,32 @@ void ImmichWindow::refreshTileStyles()
     }
 }
 
-void ImmichWindow::setAlbumLoading(bool loading)
+void ImmichWindow::setListingLoading(bool loading)
 {
-    d->albumsLoading = loading;
+    d->listingLoading = loading;
 
-    if (!d->albumStack || !d->albumLoadingOverlay)
+    // One loading state for whichever source is being listed:
+    // the current source's overlay shows while its listing is in
+    // flight, and clearing the state lowers both overlays, so a
+    // listing that finishes after the source was switched cannot
+    // leave one stuck up.
+    const auto apply = [loading](QStackedLayout* const stack, QWidget* const grid,
+                                 QWidget* const overlay, SpinnerWidget* const spinner,
+                                 bool active)
     {
-        return;
-    }
+        if (!stack || !overlay)
+        {
+            return;
+        }
 
-    d->albumLoadingOverlay->setVisible(loading);
-    d->albumStack->setCurrentWidget(loading ? static_cast<QWidget*>(d->albumLoadingOverlay)
-                                            : static_cast<QWidget*>(d->albumGrid));
-    d->albumSpinner->toggleTimer(loading);
+        const bool show = loading && active;
+        overlay->setVisible(show);
+        stack->setCurrentWidget(show ? overlay : grid);
+        spinner->toggleTimer(show);
+    };
+
+    apply(d->albumStack, d->albumGrid, d->albumLoadingOverlay, d->albumSpinner, !d->sourceIsTags);
+    apply(d->tagStack,   d->tagGrid,   d->tagLoadingOverlay,   d->tagSpinner,    d->sourceIsTags);
 }
 
 void ImmichWindow::slotRefreshAlbums()
@@ -288,11 +301,12 @@ void ImmichWindow::slotRefreshAlbums()
 
     if (d->mode == Mode::Import && d->sourceIsTags)
     {
+        setListingLoading(true);
         d->talker->listTags();
     }
     else
     {
-        setAlbumLoading(true);
+        setListingLoading(true);
         d->talker->listAlbums();
     }
 }
@@ -317,7 +331,7 @@ void ImmichWindow::slotSourceChanged()
     }
 
     d->albumArea->setVisible(!tags);
-    d->tagGrid->setVisible(tags);
+    d->tagArea->setVisible(tags);
     d->albumGrid->clear();
     d->tagGrid->clear();
     d->previewList->clear();
@@ -377,6 +391,8 @@ void ImmichWindow::slotTags(const QList<ImmichTag>& tags)
         handleSyncTagList(tags);
         return;
     }
+
+    setListingLoading(false);
 
     // A listing came back: the connection works.
     setConnected(true);
@@ -445,13 +461,13 @@ void ImmichWindow::slotAlbumCreated(const ImmichAlbum& album)
     // ready to be the upload target.
     d->pendingSelectId = album.id;
     d->status->setText(i18n("Album '%1' created.").arg(album.name));
-    setAlbumLoading(true);
+    setListingLoading(true);
     d->talker->listAlbums();
 }
 
 void ImmichWindow::slotAlbums(const QList<ImmichAlbum>& albums)
 {
-    setAlbumLoading(false);
+    setListingLoading(false);
 
     // A listing came back: the connection works.
     setConnected(true);

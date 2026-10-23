@@ -134,7 +134,7 @@ private:
     void setTransferButtonsEnabled(bool enabled);
     void setConnected(bool connected);
     void updateConnectionUi();
-    void setAlbumLoading(bool loading);
+    void setListingLoading(bool loading);
     void applyFilter();
     QListWidgetItem* findAlbumItem(const QString& id) const;
     QString currentSourceId() const;
